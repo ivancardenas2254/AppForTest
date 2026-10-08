@@ -48,7 +48,7 @@ enum PhotoStore {
         }
         do {
             try await PHPhotoLibrary.shared().performChanges {
-                _ = PHAssetChangeRequest.forAssetFromImage(atFileURL: url)
+                _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
             }
         } catch {
             throw PhotoStoreError.saveFailed(underlying: error)
