@@ -1,0 +1,19 @@
+workflows:
+  ios-workflow:
+    name: Build iOS App
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build iOS
+        script: |
+          xcodebuild -project AppForTest.xcodeproj \
+            -scheme AppForTest \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/AppForTest.xcarchive \
+            archive
+    artifacts:
+      - build/AppForTest.xcarchive
+      - /tmp/xcodebuild_logs/*.log
