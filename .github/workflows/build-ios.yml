@@ -3,21 +3,19 @@ name: Build iOS
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # Para ejecutar manualmente
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build iOS App
-    runs-on: macos-15  # o macos-latest
+    runs-on: macos-15
     timeout-minutes: 60
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Build iOS
+      - name: Build iOS (unsigned archive)
         run: |
           xcodebuild -project AppForTest.xcodeproj \
             -scheme AppForTest \
@@ -29,18 +27,15 @@ jobs:
             -archivePath build/AppForTest.xcarchive \
             archive
       
-      - name: Export .ipa (unsigned)
+      - name: Create unsigned IPA
         run: |
-          xcodebuild -exportArchive \
-            -archivePath build/AppForTest.xcarchive \
-            -exportPath build/ \
-            -exportOptionsPlist exportOptions.plist \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+          mkdir -p build/Payload
+          cp -R build/AppForTest.xcarchive/Products/Applications/AppForTest.app build/Payload/
+          cd build
+          zip -r AppForTest-unsigned.ipa Payload/
       
-      - name: Upload .ipa as artifact
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AppForTest
-          path: build/AppForTest.ipa
+          name: AppForTest-unsigned
+          path: build/AppForTest-unsigned.ipa
