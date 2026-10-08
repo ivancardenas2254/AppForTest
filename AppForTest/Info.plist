@@ -20,6 +20,10 @@
     <string>Se necesita la cámara para tomar fotos dentro de la app.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Se necesita permiso para guardar la foto que tomes en tu galería.</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>

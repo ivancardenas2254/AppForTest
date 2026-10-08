@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import Photos
+import ImageIO
 
 enum PhotoStoreError: LocalizedError {
     case encodeFailed
@@ -42,6 +43,76 @@ enum PhotoStore {
         return url
     }
 
+    static func saveLocally(movingFrom temporaryURL: URL) throws -> URL {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: capturesDirectory, withIntermediateDirectories: true)
+
+        let baseName = temporaryURL.deletingPathExtension().lastPathComponent
+        var destination = capturesDirectory.appendingPathComponent(temporaryURL.lastPathComponent)
+        var counter = 2
+        while fileManager.fileExists(atPath: destination.path) {
+            destination = capturesDirectory.appendingPathComponent("\(baseName)-\(counter).jpg")
+            counter += 1
+        }
+
+        try fileManager.moveItem(at: temporaryURL, to: destination)
+        return destination
+    }
+
+    static var capturesDirectory: URL {
+        FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Captures", isDirectory: true)
+    }
+
+    static func listCaptures() -> [URL] {
+        let fileManager = FileManager.default
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: capturesDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return items
+            .filter { $0.pathExtension.lowercased() == "jpg" }
+            .sorted { modificationDate(of: $0) > modificationDate(of: $1) }
+    }
+
+    static func deleteCapture(at url: URL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    static func purgeTemporaryLeftovers() {
+        let fileManager = FileManager.default
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: fileManager.temporaryDirectory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+
+        for url in items
+        where url.pathExtension.lowercased() == "jpg" && url.lastPathComponent.hasPrefix("IMG-") {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    static func thumbnail(at url: URL, maxPixelSize: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    private static func modificationDate(of url: URL) -> Date {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        return values?.contentModificationDate ?? .distantPast
+    }
+
     static func saveToPhotoLibrary(at url: URL) async throws {
         guard await requestAddOnlyAccess() else {
             throw PhotoStoreError.permissionDenied
@@ -53,10 +124,6 @@ enum PhotoStore {
         } catch {
             throw PhotoStoreError.saveFailed(underlying: error)
         }
-    }
-
-    static func removeTemporaryFile(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
     }
 
     private static func requestAddOnlyAccess() async -> Bool {
