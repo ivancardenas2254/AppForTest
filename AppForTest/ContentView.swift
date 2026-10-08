@@ -1,6 +1,12 @@
 import SwiftUI
+import UIKit
+import AVFoundation
 
 struct ContentView: View {
+    @State private var showCamera = false
+    @State private var capturedPhoto: CapturedPhoto?
+    @State private var alertItem: AlertItem?
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "iphone.gen3")
@@ -16,8 +22,102 @@ struct ContentView: View {
                 .font(.body)
                 .foregroundColor(.secondary)
                 .padding(.horizontal)
+
+            Button(action: openCamera) {
+                Label("Abrir cámara", systemImage: "camera.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal, 32)
+            .padding(.top, 16)
         }
         .padding()
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraView { image in
+                capture(image)
+            }
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(item: $capturedPhoto) { photo in
+            PhotoPreviewView(photo: photo)
+        }
+        .alert(item: $alertItem) { item in
+            if item.showsSettingsButton {
+                return Alert(
+                    title: Text(item.title),
+                    message: Text(item.message),
+                    primaryButton: .default(Text("Abrir Ajustes"), action: openSettings),
+                    secondaryButton: .cancel(Text("Cerrar"))
+                )
+            }
+            return Alert(
+                title: Text(item.title),
+                message: Text(item.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private func openCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            alertItem = AlertItem(
+                title: "Cámara no disponible",
+                message: "Este dispositivo (o el simulador) no tiene cámara. Usa un iPhone real.",
+                showsSettingsButton: false
+            )
+            return
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            showCamera = true
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        showCamera = true
+                    } else {
+                        showCameraPermissionDeniedAlert()
+                    }
+                }
+            }
+        default:
+            showCameraPermissionDeniedAlert()
+        }
+    }
+
+    private func showCameraPermissionDeniedAlert() {
+        alertItem = AlertItem(
+            title: "Permiso de cámara denegado",
+            message: "Activa el acceso a la cámara en Ajustes para poder usarla.",
+            showsSettingsButton: true
+        )
+    }
+
+    private func capture(_ image: UIImage) {
+        showCamera = false
+        do {
+            let url = try PhotoStore.writeToTemporaryDirectory(image)
+            let photo = CapturedPhoto(url: url)
+            DispatchQueue.main.async {
+                capturedPhoto = photo
+            }
+        } catch {
+            DispatchQueue.main.async {
+                alertItem = AlertItem(
+                    title: "No se pudo guardar",
+                    message: error.localizedDescription,
+                    showsSettingsButton: false
+                )
+            }
+        }
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 

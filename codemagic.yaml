@@ -12,8 +12,17 @@ workflows:
             -scheme AppForTest \
             -sdk iphoneos \
             -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             -archivePath build/AppForTest.xcarchive \
             archive
+      
+      - name: Create unsigned IPA
+        script: |
+          mkdir -p build/Payload
+          cp -R build/AppForTest.xcarchive/Products/Applications/AppForTest.app build/Payload/
+          cd build
+          zip -r AppForTest-unsigned.ipa Payload/
     artifacts:
-      - build/AppForTest.xcarchive
-      - /tmp/xcodebuild_logs/*.log
+      - build/AppForTest-unsigned.ipa
