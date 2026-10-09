@@ -21,9 +21,9 @@
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Se necesita permiso para guardar la foto que tomes en tu galería.</string>
     <key>UIFileSharingEnabled</key>
-    <true/>
+    <false/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
+    <false/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
