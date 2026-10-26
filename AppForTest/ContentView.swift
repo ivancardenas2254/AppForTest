@@ -8,41 +8,66 @@ struct ContentView: View {
     @State private var viewerPhoto: CapturedPhoto?
     @State private var alertItem: AlertItem?
     @State private var captures: [URL] = []
+    @StateObject private var apiTests = APITestViewModel()
+    @State private var showAPIMenu = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 20) {
-                Image(systemName: "iphone.gen3")
-                    .font(.system(size: 60))
-                    .foregroundColor(.blue)
+        NavigationStack {
+            ZStack(alignment: .trailing) {
+                VStack(spacing: 0) {
+                    VStack(spacing: 20) {
+                        Image(systemName: "iphone.gen3")
+                            .font(.system(size: 60))
+                            .foregroundColor(.blue)
+                        Button(action: openCamera) {
+                            Label("Abrir cámara", systemImage: "camera.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 16)
+                    }
+                    .padding()
 
-                Text("¡Hola desde AppForTest!")
-                    .font(.title)
-                    .fontWeight(.bold)
+                    Divider()
 
-                Text("Esta es una app de prueba lista para compilar e instalar.")
-                    .multilineTextAlignment(.center)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal)
-
-                Button(action: openCamera) {
-                    Label("Abrir cámara", systemImage: "camera.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
+                    gallery
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.horizontal, 32)
-                .padding(.top, 16)
+                .navigationTitle("AppForTest")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showAPIMenu.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "line.3.horizontal")
+                        }
+                        .accessibilityLabel("Pruebas de API")
+                    }
+                }
+
+                if showAPIMenu {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture { closeAPIMenu() }
+                        .transition(.opacity)
+
+                    APITestMenuView(model: apiTests) {
+                        closeAPIMenu()
+                    }
+                    .frame(width: 330)
+                    .frame(maxHeight: .infinity)
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+                }
             }
-            .padding()
-
-            Divider()
-
-            gallery
+            .animation(.easeInOut(duration: 0.2), value: showAPIMenu)
         }
         .onAppear {
             PhotoStore.purgeTemporaryLeftovers()
@@ -117,6 +142,12 @@ struct ContentView: View {
 
     private func refreshCaptures() {
         captures = PhotoStore.listCaptures()
+    }
+
+    private func closeAPIMenu() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showAPIMenu = false
+        }
     }
 
     private func openCamera() {

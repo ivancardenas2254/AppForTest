@@ -6,6 +6,12 @@ workflows:
     environment:
       xcode: latest
     scripts:
+      - name: Resolve Swift packages
+        script: |
+          xcodebuild -project AppForTest.xcodeproj \
+            -scheme AppForTest \
+            -resolvePackageDependencies
+      
       - name: Build iOS
         script: |
           xcodebuild -project AppForTest.xcodeproj \

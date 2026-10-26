@@ -12,6 +12,9 @@
 		A10000032A00000000000003 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052A00000000000005 /* CameraView.swift */; };
 		A10000042A00000000000004 /* PhotoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062A00000000000006 /* PhotoStore.swift */; };
 		A10000052A00000000000005 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000072A00000000000007 /* PhotoPreviewView.swift */; };
+		A10000062A00000000000006 /* APITestViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000082A00000000000008 /* APITestViewModel.swift */; };
+		A10000072A00000000000007 /* APITestMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000092A00000000000009 /* APITestMenuView.swift */; };
+		B30000012A00000000000001 /* MDTPClient in Frameworks */ = {isa = PBXBuildFile; productRef = B20000012A00000000000001 /* MDTPClient */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,6 +23,8 @@
 		A20000052A00000000000005 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		A20000062A00000000000006 /* PhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStore.swift; sourceTree = "<group>"; };
 		A20000072A00000000000007 /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
+		A20000082A00000000000008 /* APITestViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestViewModel.swift; sourceTree = "<group>"; };
+		A20000092A00000000000009 /* APITestMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestMenuView.swift; sourceTree = "<group>"; };
 		A20000032A00000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000042A00000000000004 /* AppForTest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppForTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -29,6 +34,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B30000012A00000000000001 /* MDTPClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -51,6 +57,8 @@
 				A20000052A00000000000005 /* CameraView.swift */,
 				A20000062A00000000000006 /* PhotoStore.swift */,
 				A20000072A00000000000007 /* PhotoPreviewView.swift */,
+				A20000082A00000000000008 /* APITestViewModel.swift */,
+				A20000092A00000000000009 /* APITestMenuView.swift */,
 				A20000032A00000000000003 /* Info.plist */,
 			);
 			path = AppForTest;
@@ -79,6 +87,9 @@
 			dependencies = (
 			);
 			name = AppForTest;
+			packageProductDependencies = (
+				B20000012A00000000000001 /* MDTPClient */,
+			);
 			productName = AppForTest;
 			productReference = A20000042A00000000000004 /* AppForTest.app */;
 			productType = "com.apple.product-type.application";
@@ -102,6 +113,9 @@
 				Base,
 			);
 			mainGroup = A40000012A00000000000001;
+			packageReferences = (
+				B10000012A00000000000001 /* XCLocalSwiftPackageReference "Packages/MDTPClient" */,
+			);
 			productRefGroup = A40000032A00000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -121,6 +135,8 @@
 				A10000032A00000000000003 /* CameraView.swift in Sources */,
 				A10000042A00000000000004 /* PhotoStore.swift in Sources */,
 				A10000052A00000000000005 /* PhotoPreviewView.swift in Sources */,
+				A10000062A00000000000006 /* APITestViewModel.swift in Sources */,
+				A10000072A00000000000007 /* APITestMenuView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -185,6 +201,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B10000012A00000000000001 /* XCLocalSwiftPackageReference "Packages/MDTPClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MDTPClient;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B20000012A00000000000001 /* MDTPClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MDTPClient;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A80000012A00000000000001 /* Project object */;
 }

@@ -2,3 +2,9 @@
 *.xcworkspace
 .DS_Store
 DerivedData/
+
+# Swift Package Manager: conservar versiones resueltas
+!AppForTest.xcodeproj/project.xcworkspace/
+!AppForTest.xcodeproj/project.xcworkspace/xcshareddata/
+!AppForTest.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+!AppForTest.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved

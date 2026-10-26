@@ -20,6 +20,15 @@
     <string>Se necesita la cámara para tomar fotos dentro de la app.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Se necesita permiso para guardar la foto que tomes en tu galería.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Se necesita acceso a la red local para probar el servidor MDTP.</string>
     <key>UIFileSharingEnabled</key>
     <false/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
