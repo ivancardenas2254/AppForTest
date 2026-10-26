@@ -5,6 +5,10 @@ import PackageDescription
 
 let package = Package(
     name: "MDTPClient",
+    platforms: [
+        .iOS(.v16),
+        .macOS(.v13),
+    ],
     products: [
         .library(
             name: "MDTPClient",
