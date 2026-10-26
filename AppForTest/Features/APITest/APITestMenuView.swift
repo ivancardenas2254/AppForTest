@@ -139,7 +139,3 @@ struct APITestMenuView: View {
     }
 }
 
-#Preview {
-    APITestMenuView(model: APITestViewModel(), onClose: {})
-        .frame(width: 330)
-}

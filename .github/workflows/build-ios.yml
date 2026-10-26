@@ -8,24 +8,29 @@ on:
 jobs:
   build:
     name: Build iOS App
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 60
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      
       - name: Show Xcode version
         run: xcodebuild -version
       
       - name: Resolve Swift packages
         run: |
+          set -o pipefail
           xcodebuild -project AppForTest.xcodeproj \
             -scheme AppForTest \
-            -resolvePackageDependencies
+            -resolvePackageDependencies 2>&1 | tee resolve.log
       
       - name: Build iOS (unsigned archive)
         run: |
+          set -o pipefail
           xcodebuild -project AppForTest.xcodeproj \
             -scheme AppForTest \
             -sdk iphoneos \
@@ -34,7 +39,17 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             -archivePath build/AppForTest.xcarchive \
-            archive
+            archive 2>&1 | tee build.log
+      
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            resolve.log
+            build.log
+          if-no-files-found: ignore
       
       - name: Create unsigned IPA
         run: |

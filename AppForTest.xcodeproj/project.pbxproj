@@ -8,25 +8,67 @@
 
 /* Begin PBXBuildFile section */
 		A10000012A00000000000001 /* AppForTestApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012A00000000000001 /* AppForTestApp.swift */; };
-		A10000022A00000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022A00000000000002 /* ContentView.swift */; };
+		A10000022A00000000000002 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022A00000000000002 /* HomeView.swift */; };
 		A10000032A00000000000003 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052A00000000000005 /* CameraView.swift */; };
-		A10000042A00000000000004 /* PhotoStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062A00000000000006 /* PhotoStore.swift */; };
 		A10000052A00000000000005 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000072A00000000000007 /* PhotoPreviewView.swift */; };
 		A10000062A00000000000006 /* APITestViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000082A00000000000008 /* APITestViewModel.swift */; };
 		A10000072A00000000000007 /* APITestMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000092A00000000000009 /* APITestMenuView.swift */; };
+		A10000102A00000000000010 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000102A00000000000010 /* AppContainer.swift */; };
+		A10000112A00000000000011 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000112A00000000000011 /* AppConfiguration.swift */; };
+		A10000122A00000000000012 /* AlertItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000122A00000000000012 /* AlertItem.swift */; };
+		A10000132A00000000000013 /* PhotoImageLoading.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000132A00000000000013 /* PhotoImageLoading.swift */; };
+		A10000142A00000000000014 /* CameraAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000142A00000000000014 /* CameraAuthorization.swift */; };
+		A10000152A00000000000015 /* Photo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000152A00000000000015 /* Photo.swift */; };
+		A10000162A00000000000016 /* APITestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000162A00000000000016 /* APITestModels.swift */; };
+		A10000172A00000000000017 /* PhotoRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000172A00000000000017 /* PhotoRepository.swift */; };
+		A10000182A00000000000018 /* APITestRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000182A00000000000018 /* APITestRepository.swift */; };
+		A10000192A00000000000019 /* PhotoHashing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000192A00000000000019 /* PhotoHashing.swift */; };
+		A10000202A00000000000020 /* PhotoUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000202A00000000000020 /* PhotoUseCases.swift */; };
+		A10000212A00000000000021 /* SyncPhotosUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000212A00000000000021 /* SyncPhotosUseCase.swift */; };
+		A10000222A00000000000022 /* LocalPhotoRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000222A00000000000022 /* LocalPhotoRepository.swift */; };
+		A10000232A00000000000023 /* SystemPhotoLibraryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000232A00000000000023 /* SystemPhotoLibraryRepository.swift */; };
+		A10000242A00000000000024 /* PhotoImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000242A00000000000024 /* PhotoImageLoader.swift */; };
+		A10000252A00000000000025 /* AVCameraAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000252A00000000000025 /* AVCameraAuthorization.swift */; };
+		A10000262A00000000000026 /* MDTPAPITestRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000262A00000000000026 /* MDTPAPITestRepository.swift */; };
+		A10000272A00000000000027 /* SHA256PhotoHasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000272A00000000000027 /* SHA256PhotoHasher.swift */; };
+		A10000282A00000000000028 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000282A00000000000028 /* HomeViewModel.swift */; };
+		A10000292A00000000000029 /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000292A00000000000029 /* GalleryView.swift */; };
+		A10000302A00000000000030 /* PhotoThumbnailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000302A00000000000030 /* PhotoThumbnailView.swift */; };
+		A10000312A00000000000031 /* PhotoViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000312A00000000000031 /* PhotoViewerView.swift */; };
 		B30000012A00000000000001 /* MDTPClient in Frameworks */ = {isa = PBXBuildFile; productRef = B20000012A00000000000001 /* MDTPClient */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A20000012A00000000000001 /* AppForTestApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppForTestApp.swift; sourceTree = "<group>"; };
-		A20000022A00000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A20000022A00000000000002 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		A20000032A00000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000042A00000000000004 /* AppForTest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppForTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000052A00000000000005 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
-		A20000062A00000000000006 /* PhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoStore.swift; sourceTree = "<group>"; };
 		A20000072A00000000000007 /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		A20000082A00000000000008 /* APITestViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestViewModel.swift; sourceTree = "<group>"; };
 		A20000092A00000000000009 /* APITestMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestMenuView.swift; sourceTree = "<group>"; };
-		A20000032A00000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A20000042A00000000000004 /* AppForTest.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppForTest.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000102A00000000000010 /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+		A20000112A00000000000011 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
+		A20000122A00000000000012 /* AlertItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertItem.swift; sourceTree = "<group>"; };
+		A20000132A00000000000013 /* PhotoImageLoading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImageLoading.swift; sourceTree = "<group>"; };
+		A20000142A00000000000014 /* CameraAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAuthorization.swift; sourceTree = "<group>"; };
+		A20000152A00000000000015 /* Photo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Photo.swift; sourceTree = "<group>"; };
+		A20000162A00000000000016 /* APITestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestModels.swift; sourceTree = "<group>"; };
+		A20000172A00000000000017 /* PhotoRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoRepository.swift; sourceTree = "<group>"; };
+		A20000182A00000000000018 /* APITestRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APITestRepository.swift; sourceTree = "<group>"; };
+		A20000192A00000000000019 /* PhotoHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoHashing.swift; sourceTree = "<group>"; };
+		A20000202A00000000000020 /* PhotoUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoUseCases.swift; sourceTree = "<group>"; };
+		A20000212A00000000000021 /* SyncPhotosUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncPhotosUseCase.swift; sourceTree = "<group>"; };
+		A20000222A00000000000022 /* LocalPhotoRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalPhotoRepository.swift; sourceTree = "<group>"; };
+		A20000232A00000000000023 /* SystemPhotoLibraryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPhotoLibraryRepository.swift; sourceTree = "<group>"; };
+		A20000242A00000000000024 /* PhotoImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoImageLoader.swift; sourceTree = "<group>"; };
+		A20000252A00000000000025 /* AVCameraAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVCameraAuthorization.swift; sourceTree = "<group>"; };
+		A20000262A00000000000026 /* MDTPAPITestRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MDTPAPITestRepository.swift; sourceTree = "<group>"; };
+		A20000272A00000000000027 /* SHA256PhotoHasher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SHA256PhotoHasher.swift; sourceTree = "<group>"; };
+		A20000282A00000000000028 /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		A20000292A00000000000029 /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
+		A20000302A00000000000030 /* PhotoThumbnailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoThumbnailView.swift; sourceTree = "<group>"; };
+		A20000312A00000000000031 /* PhotoViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoViewerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,14 +94,12 @@
 		A40000022A00000000000002 /* AppForTest */ = {
 			isa = PBXGroup;
 			children = (
-				A20000012A00000000000001 /* AppForTestApp.swift */,
-				A20000022A00000000000002 /* ContentView.swift */,
-				A20000052A00000000000005 /* CameraView.swift */,
-				A20000062A00000000000006 /* PhotoStore.swift */,
-				A20000072A00000000000007 /* PhotoPreviewView.swift */,
-				A20000082A00000000000008 /* APITestViewModel.swift */,
-				A20000092A00000000000009 /* APITestMenuView.swift */,
-				A20000032A00000000000003 /* Info.plist */,
+				A40000102A00000000000010 /* App */,
+				A40000112A00000000000011 /* Core */,
+				A40000152A00000000000015 /* Domain */,
+				A40000202A00000000000020 /* Data */,
+				A40000242A00000000000024 /* Features */,
+				A40000302A00000000000030 /* Resources */,
 			);
 			path = AppForTest;
 			sourceTree = "<group>";
@@ -70,6 +110,197 @@
 				A20000042A00000000000004 /* AppForTest.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000102A00000000000010 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A20000012A00000000000001 /* AppForTestApp.swift */,
+				A20000102A00000000000010 /* AppContainer.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A40000112A00000000000011 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				A20000112A00000000000011 /* AppConfiguration.swift */,
+				A40000122A00000000000012 /* UI */,
+				A40000132A00000000000013 /* Media */,
+				A40000142A00000000000014 /* Platform */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		A40000122A00000000000012 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A20000122A00000000000012 /* AlertItem.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A40000132A00000000000013 /* Media */ = {
+			isa = PBXGroup;
+			children = (
+				A20000132A00000000000013 /* PhotoImageLoading.swift */,
+			);
+			path = Media;
+			sourceTree = "<group>";
+		};
+		A40000142A00000000000014 /* Platform */ = {
+			isa = PBXGroup;
+			children = (
+				A20000142A00000000000014 /* CameraAuthorization.swift */,
+			);
+			path = Platform;
+			sourceTree = "<group>";
+		};
+		A40000152A00000000000015 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				A40000162A00000000000016 /* Models */,
+				A40000172A00000000000017 /* Repositories */,
+				A40000182A00000000000018 /* Services */,
+				A40000192A00000000000019 /* UseCases */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		A40000162A00000000000016 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A20000152A00000000000015 /* Photo.swift */,
+				A20000162A00000000000016 /* APITestModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A40000172A00000000000017 /* Repositories */ = {
+			isa = PBXGroup;
+			children = (
+				A20000172A00000000000017 /* PhotoRepository.swift */,
+				A20000182A00000000000018 /* APITestRepository.swift */,
+			);
+			path = Repositories;
+			sourceTree = "<group>";
+		};
+		A40000182A00000000000018 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A20000192A00000000000019 /* PhotoHashing.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A40000192A00000000000019 /* UseCases */ = {
+			isa = PBXGroup;
+			children = (
+				A20000202A00000000000020 /* PhotoUseCases.swift */,
+				A20000212A00000000000021 /* SyncPhotosUseCase.swift */,
+			);
+			path = UseCases;
+			sourceTree = "<group>";
+		};
+		A40000202A00000000000020 /* Data */ = {
+			isa = PBXGroup;
+			children = (
+				A40000212A00000000000021 /* Local */,
+				A40000222A00000000000022 /* Remote */,
+				A40000232A00000000000023 /* Security */,
+			);
+			path = Data;
+			sourceTree = "<group>";
+		};
+		A40000212A00000000000021 /* Local */ = {
+			isa = PBXGroup;
+			children = (
+				A20000222A00000000000022 /* LocalPhotoRepository.swift */,
+				A20000232A00000000000023 /* SystemPhotoLibraryRepository.swift */,
+				A20000242A00000000000024 /* PhotoImageLoader.swift */,
+				A20000252A00000000000025 /* AVCameraAuthorization.swift */,
+			);
+			path = Local;
+			sourceTree = "<group>";
+		};
+		A40000222A00000000000022 /* Remote */ = {
+			isa = PBXGroup;
+			children = (
+				A20000262A00000000000026 /* MDTPAPITestRepository.swift */,
+			);
+			path = Remote;
+			sourceTree = "<group>";
+		};
+		A40000232A00000000000023 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				A20000272A00000000000027 /* SHA256PhotoHasher.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		A40000242A00000000000024 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				A40000252A00000000000025 /* Camera */,
+				A40000262A00000000000026 /* Home */,
+				A40000272A00000000000027 /* Gallery */,
+				A40000282A00000000000028 /* PhotoPreview */,
+				A40000292A00000000000029 /* APITest */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		A40000252A00000000000025 /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+				A20000052A00000000000005 /* CameraView.swift */,
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
+		A40000262A00000000000026 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				A20000022A00000000000002 /* HomeView.swift */,
+				A20000282A00000000000028 /* HomeViewModel.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		A40000272A00000000000027 /* Gallery */ = {
+			isa = PBXGroup;
+			children = (
+				A20000292A00000000000029 /* GalleryView.swift */,
+				A20000302A00000000000030 /* PhotoThumbnailView.swift */,
+			);
+			path = Gallery;
+			sourceTree = "<group>";
+		};
+		A40000282A00000000000028 /* PhotoPreview */ = {
+			isa = PBXGroup;
+			children = (
+				A20000072A00000000000007 /* PhotoPreviewView.swift */,
+				A20000312A00000000000031 /* PhotoViewerView.swift */,
+			);
+			path = PhotoPreview;
+			sourceTree = "<group>";
+		};
+		A40000292A00000000000029 /* APITest */ = {
+			isa = PBXGroup;
+			children = (
+				A20000082A00000000000008 /* APITestViewModel.swift */,
+				A20000092A00000000000009 /* APITestMenuView.swift */,
+			);
+			path = APITest;
+			sourceTree = "<group>";
+		};
+		A40000302A00000000000030 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000032A00000000000003 /* Info.plist */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -131,10 +362,31 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000012A00000000000001 /* AppForTestApp.swift in Sources */,
-				A10000022A00000000000002 /* ContentView.swift in Sources */,
+				A10000102A00000000000010 /* AppContainer.swift in Sources */,
+				A10000112A00000000000011 /* AppConfiguration.swift in Sources */,
+				A10000122A00000000000012 /* AlertItem.swift in Sources */,
+				A10000132A00000000000013 /* PhotoImageLoading.swift in Sources */,
+				A10000142A00000000000014 /* CameraAuthorization.swift in Sources */,
+				A10000152A00000000000015 /* Photo.swift in Sources */,
+				A10000162A00000000000016 /* APITestModels.swift in Sources */,
+				A10000172A00000000000017 /* PhotoRepository.swift in Sources */,
+				A10000182A00000000000018 /* APITestRepository.swift in Sources */,
+				A10000192A00000000000019 /* PhotoHashing.swift in Sources */,
+				A10000202A00000000000020 /* PhotoUseCases.swift in Sources */,
+				A10000212A00000000000021 /* SyncPhotosUseCase.swift in Sources */,
+				A10000222A00000000000022 /* LocalPhotoRepository.swift in Sources */,
+				A10000232A00000000000023 /* SystemPhotoLibraryRepository.swift in Sources */,
+				A10000242A00000000000024 /* PhotoImageLoader.swift in Sources */,
+				A10000252A00000000000025 /* AVCameraAuthorization.swift in Sources */,
+				A10000262A00000000000026 /* MDTPAPITestRepository.swift in Sources */,
+				A10000272A00000000000027 /* SHA256PhotoHasher.swift in Sources */,
 				A10000032A00000000000003 /* CameraView.swift in Sources */,
-				A10000042A00000000000004 /* PhotoStore.swift in Sources */,
+				A10000022A00000000000002 /* HomeView.swift in Sources */,
+				A10000282A00000000000028 /* HomeViewModel.swift in Sources */,
+				A10000292A00000000000029 /* GalleryView.swift in Sources */,
+				A10000302A00000000000030 /* PhotoThumbnailView.swift in Sources */,
 				A10000052A00000000000005 /* PhotoPreviewView.swift in Sources */,
+				A10000312A00000000000031 /* PhotoViewerView.swift in Sources */,
 				A10000062A00000000000006 /* APITestViewModel.swift in Sources */,
 				A10000072A00000000000007 /* APITestMenuView.swift in Sources */,
 			);
@@ -152,7 +404,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				AD_HOC_CODE_SIGNING_ALLOWED = YES;
-				INFOPLIST_FILE = AppForTest/Info.plist;
+				INFOPLIST_FILE = AppForTest/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ejemplo.AppForTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -170,7 +422,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_IDENTITY = "";
 				AD_HOC_CODE_SIGNING_ALLOWED = YES;
-				INFOPLIST_FILE = AppForTest/Info.plist;
+				INFOPLIST_FILE = AppForTest/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ejemplo.AppForTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";

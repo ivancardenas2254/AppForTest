@@ -3,7 +3,7 @@ import UIKit
 import AVFoundation
 
 struct CameraView: UIViewControllerRepresentable {
-    var onCapture: (UIImage) -> Void
+    var onCapture: @MainActor (UIImage) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -23,24 +23,27 @@ struct CameraView: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        private let onCapture: (UIImage) -> Void
+        private let onCapture: @MainActor (UIImage) -> Void
         private let dismiss: DismissAction
 
-        init(onCapture: @escaping (UIImage) -> Void, dismiss: DismissAction) {
+        init(onCapture: @escaping @MainActor (UIImage) -> Void, dismiss: DismissAction) {
             self.onCapture = onCapture
             self.dismiss = dismiss
         }
 
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
             guard let image = info[.originalImage] as? UIImage else {
-                dismiss()
+                Task { @MainActor in dismiss() }
                 return
             }
-            onCapture(image)
+            Task { @MainActor in onCapture(image) }
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            dismiss()
+            Task { @MainActor in dismiss() }
         }
     }
 }
