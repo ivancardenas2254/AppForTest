@@ -464,6 +464,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		B20000012A00000000000001 /* MDTPClient */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = B10000012A00000000000001 /* XCLocalSwiftPackageReference "Packages/MDTPClient" */;
 			productName = MDTPClient;
 		};
 /* End XCSwiftPackageProductDependency section */
