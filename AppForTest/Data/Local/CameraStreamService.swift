@@ -197,7 +197,10 @@ final class CameraStreamService: NSObject {
                 }
 
                 do {
-                    self.session.sessionPreset = .high
+                    let preset: AVCaptureSession.Preset = .vga640x480
+                    self.session.sessionPreset = self.session.canSetSessionPreset(preset)
+                        ? preset
+                        : .medium
 
                     guard let device = AVCaptureDevice.default(
                         .builtInWideAngleCamera,
