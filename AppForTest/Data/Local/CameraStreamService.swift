@@ -49,6 +49,7 @@ final class CameraStreamService: NSObject {
     private var fragments: [LocalFragment] = []
     private var recordedFragments = 0
     private var uploadedFragments = 0
+    private var recordingStartFailures = 0
     private var didLoadExistingFragments = false
 
     private var uploadChain: Task<Void, Never>?
@@ -111,10 +112,15 @@ final class CameraStreamService: NSObject {
             retryPendingUploads()
         }
 
-        await startSession()
+        if UIApplication.shared.applicationState == .active {
+            await startSession()
+        } else {
+            isInactive = true
+        }
 
         isStreaming = true
         isStopping = false
+        recordingStartFailures = 0
         onStateChange?(true)
         publishStats()
         onLog?(
@@ -217,11 +223,13 @@ final class CameraStreamService: NSObject {
                         seconds: self.maxFragmentDuration,
                         preferredTimescale: 600
                     )
-                    self.movieOutput.minFreeDiskSpaceLimit = 100 * 1024 * 1024
+                    self.movieOutput.minFreeDiskSpaceLimit = 10 * 1024 * 1024
 
-                    if let connection = self.movieOutput.connection(with: .video),
-                       connection.isVideoOrientationSupported {
-                        connection.videoOrientation = .portrait
+                    if let connection = self.movieOutput.connection(with: .video) {
+                        connection.isEnabled = true
+                        if connection.isVideoOrientationSupported {
+                            connection.videoOrientation = .portrait
+                        }
                     }
 
                     succeeded = true
@@ -238,7 +246,18 @@ final class CameraStreamService: NSObject {
     private func startSession() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async {
-                self.session.startRunning()
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
+
+                let deadline = Date().addingTimeInterval(1.5)
+                while Date() < deadline {
+                    let connection = self.movieOutput.connection(with: .video)
+                    if self.session.isRunning, connection?.isActive == true {
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
                 continuation.resume()
             }
         }
@@ -259,6 +278,11 @@ final class CameraStreamService: NSObject {
         guard isStreaming, !isStopping, !isInactive else { return }
         guard currentFragmentURL == nil else { return }
 
+        guard UIApplication.shared.applicationState == .active else {
+            isInactive = true
+            return
+        }
+
         let name = "STREAM-\(Self.fileNameFormatter.string(from: Date()))-\(UUID().uuidString.prefix(4)).mov"
         let url = streamDirectoryURL.appendingPathComponent(name)
 
@@ -266,6 +290,13 @@ final class CameraStreamService: NSObject {
         currentFragmentStartedAt = Date()
 
         sessionQueue.async {
+            let isReady = self.session.isRunning
+                && self.movieOutput.connection(with: .video)?.isActive == true
+            if !isReady {
+                Task { @MainActor in
+                    self.onLog?("La cámara no está lista todavía; se intentará grabar igualmente.")
+                }
+            }
             self.movieOutput.startRecording(to: url, recordingDelegate: self)
         }
     }
@@ -283,6 +314,7 @@ final class CameraStreamService: NSObject {
         let succeeded = size > 0 && (error == nil || expectedLimit || recordingSucceeded(error))
 
         if succeeded {
+            recordingStartFailures = 0
             var duration = await duration(of: url)
             if duration <= 0, let startedAt {
                 duration = max(0, Date().timeIntervalSince(startedAt))
@@ -308,7 +340,19 @@ final class CameraStreamService: NSObject {
         } else {
             try? fileManager.removeItem(at: url)
             if let error, !expectedLimit {
-                onLog?("✗  La grabación se detuvo: \(error.localizedDescription)")
+                let nsError = error as NSError
+                onLog?(
+                    "✗ La grabación se detuvo "
+                    + "[\(nsError.domain) \(nsError.code)]: \(error.localizedDescription)"
+                )
+                if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    onLog?(
+                        "  Causa: [\(underlying.domain) \(underlying.code)] "
+                        + "\(underlying.localizedDescription)"
+                    )
+                }
+            } else if size == 0 {
+                onLog?("✗ La grabación no generó datos.")
             }
         }
 
@@ -324,12 +368,35 @@ final class CameraStreamService: NSObject {
         guard isStreaming else { return }
 
         if succeeded || wasPausingForSystem {
+            recordingStartFailures = 0
             startNextFragment()
             return
         }
 
         guard UIApplication.shared.applicationState == .active else { return }
 
+        if size == 0 {
+            recordingStartFailures += 1
+            if recordingStartFailures <= 2 {
+                onLog?(
+                    "Reintentando iniciar la grabación "
+                    + "(\(recordingStartFailures)/2)..."
+                )
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard let self,
+                          self.isStreaming,
+                          !self.isStopping,
+                          !self.isInactive else {
+                        return
+                    }
+                    self.startNextFragment()
+                }
+                return
+            }
+        }
+
+        recordingStartFailures = 0
         isStreaming = false
         onStateChange?(false)
         onLog?("Stream detenido por un error de grabación.")
