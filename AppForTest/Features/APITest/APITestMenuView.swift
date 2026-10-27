@@ -42,6 +42,20 @@ struct APITestMenuView: View {
                     action("Descargar primer registro", systemImage: "arrow.down.circle") {
                         Task { @MainActor in await model.downloadFirstRecord() }
                     }
+                    action(
+                        "Iniciar Stream de Camara",
+                        systemImage: "video.fill",
+                        isEnabled: !model.isStreaming
+                    ) {
+                        Task { @MainActor in await model.startStreamCamera() }
+                    }
+                    stopStreamAction
+                    if model.isStreaming || model.streamStats.recordedFragments > 0 {
+                        Text(model.streamStatusText)
+                            .font(.caption.monospaced())
+                            .foregroundColor(model.isStreaming ? .red : .secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     Divider()
                     logSection
                 }
@@ -117,12 +131,35 @@ struct APITestMenuView: View {
         }
     }
 
+    private var stopStreamAction: some View {
+        Button {
+            Task { @MainActor in await model.stopStreamCamera() }
+        } label: {
+            Label("Detener Stream de Camara", systemImage: "stop.circle.fill")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(
+                    Color.red.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .foregroundColor(.red)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.isStreaming)
+        .opacity(model.isStreaming ? 1 : 0.5)
+    }
+
     private func action(
         _ title: String,
         systemImage: String,
+        isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let isDisabled = model.isBusy || !isEnabled
+
+        return Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.subheadline.weight(.medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,8 +171,8 @@ struct APITestMenuView: View {
                 )
         }
         .buttonStyle(.plain)
-        .disabled(model.isBusy)
-        .opacity(model.isBusy ? 0.5 : 1)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.5 : 1)
     }
 }
 

@@ -46,6 +46,14 @@ struct DownloadSummary: Equatable {
     let sha256: Data
 }
 
+struct CameraStreamStats: Equatable {
+    var recordedFragments: Int = 0
+    var uploadedFragments: Int = 0
+    var pendingUploads: Int = 0
+    var localDuration: TimeInterval = 0
+    var localBytes: UInt64 = 0
+}
+
 struct SyncReport: Equatable {
     let deviceID: String?
     let uploadedCount: Int

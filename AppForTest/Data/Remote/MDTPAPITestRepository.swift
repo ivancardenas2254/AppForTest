@@ -172,6 +172,29 @@ final class MDTPAPITestRepository: MDTPRepository {
         }
     }
 
+    func uploadVideo(
+        fileURL: URL,
+        deviceID: String,
+        fileName: String,
+        contentType: String
+    ) async throws -> UploadSummary {
+        try await mapError {
+            let result = try await client.upload(
+                fileURL: fileURL,
+                deviceID: try data(fromHex: deviceID),
+                fileName: fileName,
+                contentType: contentType,
+                dataCategory: MDTPDataCategory.video
+            )
+            return UploadSummary(
+                deviceID: deviceID,
+                transferID: hex(result.transferID),
+                fileName: fileName,
+                success: result.success
+            )
+        }
+    }
+
     private func mapRecord(_ record: RecordInfo) -> RemoteRecord {
         RemoteRecord(
             id: hex(record.recordID),

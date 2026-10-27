@@ -20,4 +20,13 @@ protocol RemotePhotoRepository {
     func upload(photo: Photo, deviceID: String) async throws -> UploadSummary
 }
 
-protocol MDTPRepository: APITestRepository, RemotePhotoRepository {}
+protocol RemoteVideoRepository {
+    func uploadVideo(
+        fileURL: URL,
+        deviceID: String,
+        fileName: String,
+        contentType: String
+    ) async throws -> UploadSummary
+}
+
+protocol MDTPRepository: APITestRepository, RemotePhotoRepository, RemoteVideoRepository {}

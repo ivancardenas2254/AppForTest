@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -8,22 +9,57 @@ final class APITestViewModel: ObservableObject {
     @Published private(set) var deviceID: String?
     @Published private(set) var records: [RemoteRecord] = []
     @Published private(set) var lastUpload: UploadSummary?
+    @Published private(set) var isStreaming = false
+    @Published private(set) var streamStats = CameraStreamStats()
 
     let baseURL: URL
     private let repository: MDTPRepository
     private let syncPhotosUseCase: SyncPhotosUseCase
     private let loadPhotosUseCase: LoadPhotosUseCase
+    private let cameraStream: CameraStreamService
 
     init(
         repository: MDTPRepository,
         syncPhotosUseCase: SyncPhotosUseCase,
-        loadPhotosUseCase: LoadPhotosUseCase
+        loadPhotosUseCase: LoadPhotosUseCase,
+        cameraStream: CameraStreamService? = nil
     ) {
         self.repository = repository
         self.syncPhotosUseCase = syncPhotosUseCase
         self.loadPhotosUseCase = loadPhotosUseCase
         self.baseURL = repository.baseURL
         self.deviceID = repository.storedDeviceID
+
+        let stream = cameraStream ?? CameraStreamService(
+            repository: repository,
+            cameraAuthorization: AVCameraAuthorization()
+        )
+        self.cameraStream = stream
+        stream.onLog = { [weak self] line in
+            self?.append(line)
+        }
+        stream.onStateChange = { [weak self] streaming in
+            self?.isStreaming = streaming
+        }
+        stream.onStats = { [weak self] stats in
+            self?.streamStats = stats
+        }
+    }
+
+    var streamPreviewSession: AVCaptureSession {
+        cameraStream.captureSession
+    }
+
+    var streamStatusText: String {
+        let state = isStreaming ? "Grabando" : "Detenido"
+        let megabytes = Double(streamStats.localBytes) / 1_000_000
+        let totalSeconds = Int(streamStats.localDuration.rounded())
+        let duration = String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
+        let localMB = String(format: "%.1f", megabytes)
+        return "\(state) · \(streamStats.recordedFragments) frag · "
+            + "\(streamStats.uploadedFragments) enviados · "
+            + "\(streamStats.pendingUploads) pendientes · "
+            + "\(localMB) MB local · \(duration)"
     }
 
     var deviceLabel: String {
@@ -157,6 +193,30 @@ final class APITestViewModel: ObservableObject {
             let result = try await repository.download(record: record)
             append("Descarga OK · \(result.fileName) · \(result.fileSize) bytes")
         }
+    }
+
+    func startStreamCamera() async {
+        guard !isStreaming else {
+            append("El stream ya está activo.")
+            return
+        }
+
+        append("→ Iniciar Stream de Cámara")
+        do {
+            try await cameraStream.start()
+        } catch {
+            append("✗ \(error.localizedDescription)")
+        }
+    }
+
+    func stopStreamCamera() async {
+        guard isStreaming else {
+            append("El stream no está activo.")
+            return
+        }
+
+        append("→ Detener Stream de Cámara")
+        await cameraStream.stop()
     }
 
     private func perform(_ title: String, operation: () async throws -> Void) async {
