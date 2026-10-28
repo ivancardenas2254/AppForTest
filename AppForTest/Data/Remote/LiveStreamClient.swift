@@ -147,10 +147,9 @@ final class LiveStreamClient: @unchecked Sendable {
     // MARK: - Helpers
 
     private func send(_ request: URLRequest, context: String) async throws -> Int {
-        let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (_, response) = try await session.data(for: request)
         } catch {
             throw StreamError.networkError(error)
         }
@@ -173,4 +172,3 @@ final class LiveStreamClient: @unchecked Sendable {
         return hash.map { String(format: "%02x", $0) }.joined()
     }
 }
-

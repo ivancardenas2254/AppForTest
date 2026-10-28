@@ -12,6 +12,161 @@ struct CameraStreamError: LocalizedError, Sendable {
     var errorDescription: String? { message }
 }
 
+// MARK: - FragmentedMP4Writer (Internal nonisolated pipeline)
+
+private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
+    AVCaptureVideoDataOutputSampleBufferDelegate,
+    AVCaptureAudioDataOutputSampleBufferDelegate,
+    AVAssetWriterDelegate {
+
+    private let queue: DispatchQueue
+    private var assetWriter: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?
+    private var isStarted = false
+    private var firstPTS: CMTime?
+    private var tempFileURL: URL?
+
+    var onSegment: (@Sendable (Data, AVAssetSegmentType, AVAssetSegmentReport?) -> Void)?
+    var onError: (@Sendable (String) -> Void)?
+
+    init(queue: DispatchQueue) {
+        self.queue = queue
+        super.init()
+    }
+
+    func start() {
+        queue.async {
+            self.setupWriter()
+        }
+    }
+
+    private func setupWriter() {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("livestream-\(UUID().uuidString).mp4")
+        self.tempFileURL = tempURL
+
+        do {
+            let writer = try AVAssetWriter(outputURL: tempURL, fileType: .mp4)
+            writer.preferredOutputSegmentInterval = CMTime(seconds: 1.0, preferredTimescale: 1000)
+            writer.outputFileTypeProfile = .mpeg4AppleHLS
+            writer.delegate = self
+
+            // Video input: H.264, 640×480, ~1000 kbps, 1 keyframe/s
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: 640,
+                AVVideoHeightKey: 480,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 1_000_000,
+                    AVVideoMaxKeyFrameIntervalDurationKey: 1.0,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264BaselineAutoLevel,
+                ] as [String: Any],
+            ]
+            let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            vInput.expectsMediaDataInRealTime = true
+            vInput.transform = CGAffineTransform(rotationAngle: .pi / 2)
+            if writer.canAdd(vInput) {
+                writer.add(vInput)
+            }
+            self.videoInput = vInput
+
+            // Audio input: AAC-LC, 1 channel, 44.1 kHz
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderBitRateKey: 64000,
+            ]
+            let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            aInput.expectsMediaDataInRealTime = true
+            if writer.canAdd(aInput) {
+                writer.add(aInput)
+            }
+            self.audioInput = aInput
+
+            self.assetWriter = writer
+            self.isStarted = false
+            self.firstPTS = nil
+        } catch {
+            self.onError?("No se pudo crear AVAssetWriter: \(error.localizedDescription)")
+        }
+    }
+
+    func finish() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async {
+                guard let writer = self.assetWriter else {
+                    continuation.resume()
+                    return
+                }
+
+                if writer.status == .writing {
+                    writer.finishWriting {
+                        if let url = self.tempFileURL {
+                            try? FileManager.default.removeItem(at: url)
+                        }
+                        continuation.resume()
+                    }
+                } else {
+                    if let url = self.tempFileURL {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                    continuation.resume()
+                }
+
+                self.assetWriter = nil
+                self.videoInput = nil
+                self.audioInput = nil
+                self.isStarted = false
+            }
+        }
+    }
+
+    // MARK: - Sample buffer delegate
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard let writer = assetWriter else { return }
+
+        let isVideo = output is AVCaptureVideoDataOutput
+
+        if !isStarted {
+            guard isVideo else { return }
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            firstPTS = pts
+            writer.initialSegmentStartTime = pts
+            guard writer.startWriting() else {
+                let msg = writer.error?.localizedDescription ?? "desconocido"
+                onError?("AVAssetWriter.startWriting() falló: \(msg)")
+                return
+            }
+            writer.startSession(atSourceTime: pts)
+            isStarted = true
+        }
+
+        guard writer.status == .writing else { return }
+
+        let input = isVideo ? videoInput : audioInput
+        guard let input, input.isReadyForMoreMediaData else { return }
+        input.append(sampleBuffer)
+    }
+
+    // MARK: - AVAssetWriterDelegate
+
+    func assetWriter(
+        _ writer: AVAssetWriter,
+        didOutputSegmentData segmentData: Data,
+        segmentType: AVAssetSegmentType,
+        segmentReport: AVAssetSegmentReport?
+    ) {
+        onSegment?(segmentData, segmentType, segmentReport)
+    }
+}
+
 // MARK: - CameraStreamService
 
 @MainActor
@@ -37,25 +192,17 @@ final class CameraStreamService: NSObject {
     private let cameraAuthorization: CameraAuthorization
     private let baseURL: URL
 
-    // MARK: - Capture pipeline (nonisolated for sessionQueue)
+    // MARK: - Capture pipeline
 
     private nonisolated let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "AppForTest.CameraStream.session")
     private let writerQueue = DispatchQueue(label: "AppForTest.CameraStream.writer")
 
-    /// Upload serialisation
-    private let uploadQueue = DispatchQueue(label: "AppForTest.CameraStream.upload")
+    private var videoOutput: AVCaptureVideoDataOutput?
+    private var audioOutput: AVCaptureAudioDataOutput?
+    private var writer: FragmentedMP4Writer?
 
-    // MARK: - Writer state (touched on writerQueue only)
-
-    private var assetWriter: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
-    private var writerStarted = false
-    private var firstPTS: CMTime?
-    private var lastSamplePTS: CMTime?
-
-    // MARK: - Streaming state (MainActor)
+    // MARK: - Streaming state
 
     private var isConfigured = false
     private var isStarting = false
@@ -206,7 +353,7 @@ final class CameraStreamService: NSObject {
         if isInactive {
             onLog?("La cámara esperará a que la app vuelva al primer plano.")
         } else {
-            await startWriter()
+            startWriter()
         }
     }
 
@@ -231,7 +378,6 @@ final class CameraStreamService: NSObject {
                 await withTaskGroup(of: Void.self) { group in
                     group.addTask { await chain.value }
                     group.addTask { await deadline.value }
-                    // Whichever finishes first
                     await group.next()
                     group.cancelAll()
                 }
@@ -258,7 +404,7 @@ final class CameraStreamService: NSObject {
     private func configureIfNeeded() async throws {
         guard !isConfigured else { return }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let (vOut, aOut) = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(AVCaptureVideoDataOutput, AVCaptureAudioDataOutput), Error>) in
             sessionQueue.async {
                 self.session.beginConfiguration()
                 var succeeded = false
@@ -309,7 +455,6 @@ final class CameraStreamService: NSObject {
                         throw CameraStreamError("No se pudo configurar la salida de video.")
                     }
                     self.session.addOutput(videoOutput)
-                    videoOutput.setSampleBufferDelegate(self, queue: self.writerQueue)
 
                     if let connection = videoOutput.connection(with: .video) {
                         connection.isEnabled = true
@@ -321,17 +466,18 @@ final class CameraStreamService: NSObject {
                         throw CameraStreamError("No se pudo configurar la salida de audio.")
                     }
                     self.session.addOutput(audioOutput)
-                    audioOutput.setSampleBufferDelegate(self, queue: self.writerQueue)
 
                     succeeded = true
-                    continuation.resume()
+                    continuation.resume(returning: (videoOutput, audioOutput))
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
         }
 
-        isConfigured = true
+        self.videoOutput = vOut
+        self.audioOutput = aOut
+        self.isConfigured = true
     }
 
     private func startSession() async {
@@ -340,7 +486,6 @@ final class CameraStreamService: NSObject {
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
-                // Wait briefly for session to stabilize
                 let deadline = Date().addingTimeInterval(1.5)
                 while Date() < deadline {
                     if self.session.isRunning { break }
@@ -362,101 +507,96 @@ final class CameraStreamService: NSObject {
         }
     }
 
-    // MARK: - AVAssetWriter lifecycle
+    // MARK: - Writer control
 
-    private func startWriter() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            writerQueue.async {
-                self.setupAssetWriter()
-                continuation.resume()
+    private func startWriter() {
+        let writer = FragmentedMP4Writer(queue: writerQueue)
+        self.writer = writer
+
+        writer.onSegment = { [weak self] segmentData, segmentType, segmentReport in
+            Task { @MainActor [weak self] in
+                self?.handleOutputSegment(segmentData, type: segmentType, report: segmentReport)
             }
         }
-    }
 
-    /// Sets up a fresh AVAssetWriter in fragmented MP4 mode.
-    /// MUST be called on writerQueue.
-    private func setupAssetWriter() {
-        // Clean up any existing writer
-        assetWriter = nil
-        videoInput = nil
-        audioInput = nil
-        writerStarted = false
-        firstPTS = nil
-        lastSamplePTS = nil
-
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("livestream-\(UUID().uuidString).mp4")
-
-        guard let writer = try? AVAssetWriter(outputURL: tempURL, fileType: .mp4) else {
-            Task { @MainActor in
-                self.onLog?("✗ No se pudo crear AVAssetWriter.")
+        writer.onError = { [weak self] message in
+            Task { @MainActor [weak self] in
+                self?.onLog?("✗ \(message)")
             }
-            return
         }
 
-        // Fragmented MP4: ~1 s segments via delegate
-        writer.preferredOutputSegmentInterval = CMTime(value: 1, timescale: 1)
-        writer.outputFileTypeProfile = .mpeg4AppleHLS
-        writer.delegate = self
+        videoOutput?.setSampleBufferDelegate(writer, queue: writerQueue)
+        audioOutput?.setSampleBufferDelegate(writer, queue: writerQueue)
 
-        // Video input: H.264, 640×480, ~1000 kbps, 1 keyframe/s
-        let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: 640,
-            AVVideoHeightKey: 480,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 1_000_000,
-                AVVideoMaxKeyFrameIntervalDurationKey: 1.0,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264BaselineAutoLevel,
-            ] as [String: Any],
-        ]
-        let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        vInput.expectsMediaDataInRealTime = true
-        // Transform for portrait (back camera delivers landscape; rotate 90° CW)
-        vInput.transform = CGAffineTransform(rotationAngle: .pi / 2)
-        writer.add(vInput)
-        self.videoInput = vInput
-
-        // Audio input: AAC-LC, 1 channel, 44.1 kHz
-        let audioSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 64000,
-        ]
-        let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-        aInput.expectsMediaDataInRealTime = true
-        writer.add(aInput)
-        self.audioInput = aInput
-
-        self.assetWriter = writer
+        writer.start()
     }
 
-    /// Finalizes the writer, flushing the last partial segment.
     private func finalizeWriter() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            writerQueue.async {
-                guard let writer = self.assetWriter else {
-                    continuation.resume()
-                    return
-                }
+        videoOutput?.setSampleBufferDelegate(nil, queue: nil)
+        audioOutput?.setSampleBufferDelegate(nil, queue: nil)
 
-                if writer.status == .writing {
-                    writer.finishWriting {
-                        // Clean up temp file
-                        try? FileManager.default.removeItem(at: writer.outputURL)
-                        continuation.resume()
-                    }
-                } else {
-                    try? FileManager.default.removeItem(at: writer.outputURL)
-                    continuation.resume()
-                }
+        if let writer = self.writer {
+            await writer.finish()
+            self.writer = nil
+        }
+    }
 
-                self.assetWriter = nil
-                self.videoInput = nil
-                self.audioInput = nil
-                self.writerStarted = false
+    private func handleOutputSegment(
+        _ segmentData: Data,
+        type segmentType: AVAssetSegmentType,
+        report segmentReport: AVAssetSegmentReport?
+    ) {
+        switch segmentType {
+        case .initialization:
+            self.initSegmentData = segmentData
+            self.onLog?("Init segment recibido · \(Self.formatBytes(UInt64(segmentData.count)))")
+            self.enqueueInitUpload(segmentData, streamID: self.streamID)
+
+        case .separable:
+            guard self.isStreaming else { return }
+
+            let seq = self.nextSeq
+            self.nextSeq += 1
+
+            // Compute timing relative to session start
+            let durationMs: Int
+            if let report = segmentReport,
+               let trackReport = report.trackReports.first {
+                let durSeconds = CMTimeGetSeconds(trackReport.duration)
+                durationMs = (durSeconds.isFinite && durSeconds > 0)
+                    ? max(1, Int((durSeconds * 1000).rounded()))
+                    : 1000
+            } else {
+                durationMs = 1000
             }
+
+            // Strictly monotonic startMs: startMs > lastSegmentStartMs
+            let startMs = max(self.lastSegmentStartMs + 1, self.nextSegmentStartMs)
+            self.lastSegmentStartMs = startMs
+            self.nextSegmentStartMs = startMs + Int64(durationMs)
+
+            let capturedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+            let segment = LocalSegment(
+                streamID: self.streamID,
+                seq: seq,
+                data: segmentData,
+                startMs: startMs,
+                durationMs: durationMs,
+                capturedAtMs: capturedAtMs,
+                uploaded: false,
+                uploading: true,
+                createdAt: Date()
+            )
+
+            self.segments.append(segment)
+            self.recordedSegments += 1
+            self.publishStats()
+            self.enqueueSegmentUpload(seq: seq, streamID: self.streamID)
+            self.pruneIfNeeded()
+
+        @unknown default:
+            break
         }
     }
 
@@ -496,8 +636,6 @@ final class CameraStreamService: NSObject {
             + "El stream se reanudará al volver."
         )
 
-        // Finalize writer so the last segment is flushed.
-        // When we come back we'll create a NEW stream_id because PTS restarts.
         Task { @MainActor in
             await self.finalizeWriter()
         }
@@ -508,14 +646,11 @@ final class CameraStreamService: NSObject {
         isInactive = false
         guard isStreaming else { return }
 
-        // PTS will restart → new stream_id to keep monotonic start_ms.
-        // POST stop on the old stream (best-effort), then start a new one.
         onLog?("Cámara reanudada. Creando nuevo stream (PTS reinicia).")
 
         let oldStreamID = streamID
         let oldDeviceID = deviceID
 
-        // Best-effort stop on old stream
         if let client {
             Task {
                 try? await client.stopStream(streamID: oldStreamID, deviceID: oldDeviceID)
@@ -553,13 +688,12 @@ final class CameraStreamService: NSObject {
                 onLog?("playlist: \(playlistURL)")
             } catch {
                 onLog?("✗ No se pudo crear nuevo stream: \(error.localizedDescription)")
-                // Continue anyway — segments will queue locally
             }
         }
 
         publishStats()
         await startSession()
-        await startWriter()
+        startWriter()
     }
 
     // MARK: - Upload pipeline
@@ -710,7 +844,6 @@ final class CameraStreamService: NSObject {
     // MARK: - Buffer management
 
     private func pruneIfNeeded() {
-        // Remove oldest uploaded segments beyond 5-min window
         var totalDuration = segments.reduce(0.0) { $0 + Double($1.durationMs) / 1000.0 }
         while totalDuration > maxLocalDuration, let oldest = segments.first {
             guard oldest.uploaded else { break }
@@ -718,8 +851,6 @@ final class CameraStreamService: NSObject {
             totalDuration -= Double(oldest.durationMs) / 1000.0
         }
 
-        // Also prune non-uploaded segments that are too old (> 5 min)
-        // per spec: "Si la cola local supera 5 min, tirá los más viejos no subidos"
         let cutoff = Date().addingTimeInterval(-maxLocalDuration)
         while let oldest = segments.first, oldest.createdAt < cutoff, !oldest.uploading {
             let dropped = segments.removeFirst()
@@ -761,115 +892,5 @@ final class CameraStreamService: NSObject {
     static func formatDuration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate + AVCaptureAudioDataOutputSampleBufferDelegate
-
-extension CameraStreamService: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
-
-    nonisolated func captureOutput(
-        _ output: AVCaptureOutput,
-        didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
-    ) {
-        // All work on writerQueue (we're already on it since that's the delegate queue)
-        guard let writer = assetWriter else { return }
-
-        let isVideo = output is AVCaptureVideoDataOutput
-
-        // Start the writer on the first video sample
-        if !writerStarted {
-            guard isVideo else { return }  // wait for first video sample
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            firstPTS = pts
-            writer.initialSegmentStartTime = pts
-            guard writer.startWriting() else {
-                Task { @MainActor [weak self] in
-                    self?.onLog?("✗ AVAssetWriter.startWriting() falló: \(writer.error?.localizedDescription ?? "desconocido")")
-                }
-                return
-            }
-            writer.startSession(atSourceTime: pts)
-            writerStarted = true
-        }
-
-        guard writer.status == .writing else { return }
-
-        let input = isVideo ? videoInput : audioInput
-        guard let input, input.isReadyForMoreMediaData else { return }
-        input.append(sampleBuffer)
-        lastSamplePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-    }
-}
-
-// MARK: - AVAssetWriterDelegate
-
-extension CameraStreamService: AVAssetWriterDelegate {
-
-    nonisolated func assetWriter(
-        _ writer: AVAssetWriter,
-        didOutputSegmentData segmentData: Data,
-        segmentType: AVAssetSegmentType,
-        segmentReport: AVAssetSegmentReport?
-    ) {
-        switch segmentType {
-        case .initialization:
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.initSegmentData = segmentData
-                self.onLog?("Init segment recibido · \(Self.formatBytes(UInt64(segmentData.count)))")
-                self.enqueueInitUpload(segmentData, streamID: self.streamID)
-            }
-
-        case .separable:
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard self.isStreaming else { return }
-
-                let seq = self.nextSeq
-                self.nextSeq += 1
-
-                // Compute timing relative to session start
-                let durationMs: Int
-                if let report = segmentReport,
-                   let trackReport = report.trackReports.first {
-                    let durSeconds = trackReport.duration.seconds
-                    durationMs = (durSeconds.isFinite && durSeconds > 0)
-                        ? max(1, Int((durSeconds * 1000).rounded()))
-                        : 1000
-                } else {
-                    durationMs = 1000
-                }
-
-                // Strictly monotonic startMs: startMs > lastSegmentStartMs
-                let startMs = max(self.lastSegmentStartMs + 1, self.nextSegmentStartMs)
-                self.lastSegmentStartMs = startMs
-                self.nextSegmentStartMs = startMs + Int64(durationMs)
-
-                let capturedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
-
-                let segment = LocalSegment(
-                    streamID: self.streamID,
-                    seq: seq,
-                    data: segmentData,
-                    startMs: startMs,
-                    durationMs: durationMs,
-                    capturedAtMs: capturedAtMs,
-                    uploaded: false,
-                    uploading: true,
-                    createdAt: Date()
-                )
-
-                self.segments.append(segment)
-                self.recordedSegments += 1
-                self.publishStats()
-                self.enqueueSegmentUpload(seq: seq, streamID: self.streamID)
-                self.pruneIfNeeded()
-            }
-
-        @unknown default:
-            break
-        }
     }
 }
