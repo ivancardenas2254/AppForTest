@@ -29,7 +29,7 @@ struct CameraStreamScreen: View {
             Circle()
                 .fill(isStreaming ? Color.red : Color.secondary)
                 .frame(width: 10, height: 10)
-            Text(isStreaming ? "Stream de cámara" : "Stream detenido")
+            Text(isStreaming ? "Stream HLS en vivo" : "Stream detenido")
                 .font(.headline)
             Spacer()
         }

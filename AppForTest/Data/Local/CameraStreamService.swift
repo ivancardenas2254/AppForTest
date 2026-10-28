@@ -12,72 +12,105 @@ struct CameraStreamError: LocalizedError, Sendable {
     var errorDescription: String? { message }
 }
 
+// MARK: - CameraStreamService
+
 @MainActor
 final class CameraStreamService: NSObject {
-    private struct LocalFragment {
-        let id: UUID
-        let url: URL
-        let duration: TimeInterval
-        let sizeBytes: UInt64
+
+    // MARK: - Local segment model
+
+    private struct LocalSegment {
+        let streamID: String
+        let seq: Int
+        let data: Data
+        let startMs: Int64
+        let durationMs: Int
+        let capturedAtMs: Int64
         var uploaded: Bool
         var uploading: Bool
+        let createdAt: Date
     }
+
+    // MARK: - Dependencies
 
     private let repository: MDTPRepository
     private let cameraAuthorization: CameraAuthorization
-    private let fileManager: FileManager
+    private let baseURL: URL
+
+    // MARK: - Capture pipeline (nonisolated for sessionQueue)
 
     private nonisolated let session = AVCaptureSession()
-    private nonisolated let movieOutput = AVCaptureMovieFileOutput()
     private let sessionQueue = DispatchQueue(label: "AppForTest.CameraStream.session")
+    private let writerQueue = DispatchQueue(label: "AppForTest.CameraStream.writer")
 
-    private nonisolated let maxFragmentBytes: Int64
-    private nonisolated let maxFragmentDuration: TimeInterval
-    private let maxLocalDuration: TimeInterval
-    private let contentType = "video/quicktime"
+    /// Upload serialisation
+    private let uploadQueue = DispatchQueue(label: "AppForTest.CameraStream.upload")
+
+    // MARK: - Writer state (touched on writerQueue only)
+
+    private var assetWriter: AVAssetWriter?
+    private var videoInput: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?
+    private var writerStarted = false
+    private var firstPTS: CMTime?
+    private var lastSamplePTS: CMTime?
+
+    // MARK: - Streaming state (MainActor)
 
     private var isConfigured = false
     private var isStarting = false
-    private var isStreaming = false
+    private(set) var isStreaming = false
     private var isStopping = false
     private var isInactive = false
-    private var isPausingForSystem = false
-    private var currentFragmentURL: URL?
-    private var currentFragmentStartedAt: Date?
-    private var deviceID: String?
 
-    private var fragments: [LocalFragment] = []
-    private var recordedFragments = 0
-    private var uploadedFragments = 0
-    private var recordingStartFailures = 0
-    private var didLoadExistingFragments = false
+    private var streamID: String = ""
+    private var deviceID: String = ""
+    private var deviceName: String = ""
+    private var startedAtMs: Int64 = 0
+    private var nextSeq: Int = 0
+    private var nextSegmentStartMs: Int64 = 0
+    private var lastSegmentStartMs: Int64 = -1
+
+    // MARK: - Init segment
+
+    private var initSegmentData: Data?
+    private var initSent = false
+
+    // MARK: - Local buffer (5 min window)
+
+    private let maxLocalDuration: TimeInterval = 5 * 60
+    private var segments: [LocalSegment] = []
+    private var recordedSegments = 0
+    private var uploadedSegments = 0
+
+    // MARK: - Upload chain
 
     private var uploadChain: Task<Void, Never>?
-    private var stopContinuation: CheckedContinuation<Void, Never>?
+    private var client: LiveStreamClient?
+
+    // MARK: - Callbacks
 
     var onLog: ((String) -> Void)?
     var onStateChange: ((Bool) -> Void)?
     var onStats: ((CameraStreamStats) -> Void)?
 
+    // MARK: - Init
+
     init(
         repository: MDTPRepository,
         cameraAuthorization: CameraAuthorization,
-        fileManager: FileManager = .default,
-        maxFragmentBytes: Int64 = 1_000_000,
-        maxFragmentDuration: TimeInterval = 60,
-        maxLocalDuration: TimeInterval = 5 * 60
+        baseURL: URL? = nil
     ) {
         self.repository = repository
         self.cameraAuthorization = cameraAuthorization
-        self.fileManager = fileManager
-        self.maxFragmentBytes = maxFragmentBytes
-        self.maxFragmentDuration = maxFragmentDuration
-        self.maxLocalDuration = maxLocalDuration
+        self.baseURL = baseURL ?? repository.baseURL
         super.init()
         observeAppLifecycle()
     }
 
     var captureSession: AVCaptureSession { session }
+
+    // MARK: - Start
 
     func start() async throws {
         guard !isStarting, !isStreaming, !isStopping else { return }
@@ -85,6 +118,7 @@ final class CameraStreamService: NSObject {
         isStarting = true
         defer { isStarting = false }
 
+        // --- Camera permission ---
         switch cameraAuthorization.status() {
         case .authorized:
             break
@@ -100,18 +134,64 @@ final class CameraStreamService: NSObject {
             throw CameraStreamError("La cámara no está disponible en este dispositivo.")
         }
 
-        try await configureIfNeeded()
-        try ensureStreamDirectory()
-
-        deviceID = try await repository.ensureDevice()
-
-        if !didLoadExistingFragments {
-            didLoadExistingFragments = true
-            await loadExistingFragments()
-        } else {
-            retryPendingUploads()
+        // --- Microphone permission ---
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch micStatus {
+        case .authorized:
+            break
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard granted else {
+                throw CameraStreamError("Permiso de micrófono denegado. El stream requiere audio.")
+            }
+        case .denied, .restricted:
+            throw CameraStreamError("Activa el acceso al micrófono en Ajustes. El stream requiere audio.")
+        @unknown default:
+            throw CameraStreamError("Estado de micrófono desconocido.")
         }
 
+        // --- Configure session ---
+        try await configureIfNeeded()
+
+        // --- Device registration ---
+        deviceID = try await repository.ensureDevice().lowercased()
+        deviceName = String(UIDevice.current.name.prefix(60))
+
+        // --- Generate stream_id (16 random bytes → 32 hex lowercase) ---
+        streamID = Self.generateStreamID().lowercased()
+        startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        nextSeq = 0
+        nextSegmentStartMs = 0
+        lastSegmentStartMs = -1
+        initSegmentData = nil
+        initSent = false
+        segments.removeAll()
+        recordedSegments = 0
+        uploadedSegments = 0
+
+        // --- HTTP client ---
+        client = LiveStreamClient(baseURL: baseURL)
+
+        // --- POST /v1/streams ---
+        let startBody = LiveStreamClient.StartBody(
+            stream_id: streamID,
+            device_id: deviceID,
+            device_name: deviceName,
+            width: 640,
+            height: 480,
+            video_codec: "avc1.42E01E",
+            audio_codec: "mp4a.40.2",
+            started_at_ms: startedAtMs
+        )
+
+        let status = try await client!.startStream(startBody)
+        onLog?("POST /v1/streams → \(status)")
+
+        let playlistURL = "\(baseURL.absoluteString)/live/\(streamID)/live.m3u8"
+        onLog?("stream_id: \(streamID.prefix(8))… · playlist: \(playlistURL)")
+        onLog?("Reproducir con: ffplay -fflags nobuffer \(playlistURL)")
+
+        // --- Start session & writer ---
         if UIApplication.shared.applicationState == .active {
             await startSession()
         } else {
@@ -120,20 +200,17 @@ final class CameraStreamService: NSObject {
 
         isStreaming = true
         isStopping = false
-        recordingStartFailures = 0
         onStateChange?(true)
         publishStats()
-        onLog?(
-            "Stream iniciado · fragmentos de hasta "
-            + "\(maxFragmentBytes / 1_000_000) MB · ventana local de 5 min"
-        )
 
         if isInactive {
             onLog?("La cámara esperará a que la app vuelva al primer plano.")
         } else {
-            startNextFragment()
+            await startWriter()
         }
     }
+
+    // MARK: - Stop
 
     func stop() async {
         guard isStreaming, !isStopping else { return }
@@ -142,44 +219,41 @@ final class CameraStreamService: NSObject {
         isStreaming = false
         onStateChange?(false)
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            stopContinuation = continuation
-            sessionQueue.async {
-                if self.movieOutput.isRecording {
-                    self.movieOutput.stopRecording()
-                } else {
-                    Task { @MainActor in
-                        self.resumeStopIfNeeded()
-                    }
+        // Finalize the writer (flushes the last segment)
+        await finalizeWriter()
+
+        // Wait for pending uploads to drain (best-effort, 3 s max)
+        if let chain = uploadChain {
+            let deadline = Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+            _ = await Task {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { await chain.value }
+                    group.addTask { await deadline.value }
+                    // Whichever finishes first
+                    await group.next()
+                    group.cancelAll()
                 }
+            }.value
+        }
+
+        // POST /v1/streams/{id}/stop
+        if let client {
+            do {
+                let status = try await client.stopStream(streamID: streamID, deviceID: deviceID)
+                onLog?("POST /stop → \(status)")
+            } catch {
+                onLog?("POST /stop falló: \(error.localizedDescription)")
             }
         }
 
         await stopSession()
         isStopping = false
-        isPausingForSystem = false
-        onLog?("Stream detenido. Los fragmentos pendientes continúan enviándose.")
+        onLog?("Stream detenido.")
     }
 
-    private var streamDirectoryURL: URL {
-        fileManager
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("CameraStream", isDirectory: true)
-    }
-
-    private static let fileNameFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return formatter
-    }()
-
-    private func ensureStreamDirectory() throws {
-        try fileManager.createDirectory(
-            at: streamDirectoryURL,
-            withIntermediateDirectories: true
-        )
-    }
+    // MARK: - Session configuration
 
     private func configureIfNeeded() async throws {
         guard !isConfigured else { return }
@@ -197,12 +271,14 @@ final class CameraStreamService: NSObject {
                 }
 
                 do {
+                    // Session preset
                     let preset: AVCaptureSession.Preset = .vga640x480
                     self.session.sessionPreset = self.session.canSetSessionPreset(preset)
                         ? preset
                         : .medium
 
-                    guard let device = AVCaptureDevice.default(
+                    // Video input (back camera)
+                    guard let videoDevice = AVCaptureDevice.default(
                         .builtInWideAngleCamera,
                         for: .video,
                         position: .back
@@ -210,30 +286,42 @@ final class CameraStreamService: NSObject {
                         throw CameraStreamError("No se encontró una cámara disponible.")
                     }
 
-                    let input = try AVCaptureDeviceInput(device: device)
-                    guard self.session.canAddInput(input) else {
+                    let videoInput = try AVCaptureDeviceInput(device: videoDevice)
+                    guard self.session.canAddInput(videoInput) else {
                         throw CameraStreamError("No se pudo agregar la cámara a la sesión.")
                     }
-                    self.session.addInput(input)
+                    self.session.addInput(videoInput)
 
-                    guard self.session.canAddOutput(self.movieOutput) else {
-                        throw CameraStreamError("No se pudo configurar la grabación de video.")
+                    // Audio input (microphone)
+                    guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
+                        throw CameraStreamError("No se encontró un micrófono disponible.")
                     }
-                    self.session.addOutput(self.movieOutput)
+                    let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+                    guard self.session.canAddInput(audioInput) else {
+                        throw CameraStreamError("No se pudo agregar el micrófono a la sesión.")
+                    }
+                    self.session.addInput(audioInput)
 
-                    self.movieOutput.maxRecordedFileSize = self.maxFragmentBytes
-                    self.movieOutput.maxRecordedDuration = CMTime(
-                        seconds: self.maxFragmentDuration,
-                        preferredTimescale: 600
-                    )
-                    self.movieOutput.minFreeDiskSpaceLimit = 10 * 1024 * 1024
+                    // Video data output
+                    let videoOutput = AVCaptureVideoDataOutput()
+                    videoOutput.alwaysDiscardsLateVideoFrames = true
+                    guard self.session.canAddOutput(videoOutput) else {
+                        throw CameraStreamError("No se pudo configurar la salida de video.")
+                    }
+                    self.session.addOutput(videoOutput)
+                    videoOutput.setSampleBufferDelegate(self, queue: self.writerQueue)
 
-                    if let connection = self.movieOutput.connection(with: .video) {
+                    if let connection = videoOutput.connection(with: .video) {
                         connection.isEnabled = true
-                        if connection.isVideoOrientationSupported {
-                            connection.videoOrientation = .portrait
-                        }
                     }
+
+                    // Audio data output
+                    let audioOutput = AVCaptureAudioDataOutput()
+                    guard self.session.canAddOutput(audioOutput) else {
+                        throw CameraStreamError("No se pudo configurar la salida de audio.")
+                    }
+                    self.session.addOutput(audioOutput)
+                    audioOutput.setSampleBufferDelegate(self, queue: self.writerQueue)
 
                     succeeded = true
                     continuation.resume()
@@ -252,13 +340,10 @@ final class CameraStreamService: NSObject {
                 if !self.session.isRunning {
                     self.session.startRunning()
                 }
-
+                // Wait briefly for session to stabilize
                 let deadline = Date().addingTimeInterval(1.5)
                 while Date() < deadline {
-                    let connection = self.movieOutput.connection(with: .video)
-                    if self.session.isRunning, connection?.isActive == true {
-                        break
-                    }
+                    if self.session.isRunning { break }
                     Thread.sleep(forTimeInterval: 0.05)
                 }
                 continuation.resume()
@@ -277,134 +362,105 @@ final class CameraStreamService: NSObject {
         }
     }
 
-    private func startNextFragment() {
-        guard isStreaming, !isStopping, !isInactive else { return }
-        guard currentFragmentURL == nil else { return }
+    // MARK: - AVAssetWriter lifecycle
 
-        guard UIApplication.shared.applicationState == .active else {
-            isInactive = true
-            return
-        }
-
-        let name = "STREAM-\(Self.fileNameFormatter.string(from: Date()))-\(UUID().uuidString.prefix(4)).mov"
-        let url = streamDirectoryURL.appendingPathComponent(name)
-
-        currentFragmentURL = url
-        currentFragmentStartedAt = Date()
-
-        sessionQueue.async {
-            let isReady = self.session.isRunning
-                && self.movieOutput.connection(with: .video)?.isActive == true
-            if !isReady {
-                Task { @MainActor in
-                    self.onLog?("La cámara no está lista todavía; se intentará grabar igualmente.")
-                }
+    private func startWriter() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            writerQueue.async {
+                self.setupAssetWriter()
+                continuation.resume()
             }
-            self.movieOutput.startRecording(to: url, recordingDelegate: self)
         }
     }
 
-    private func handleFragmentFinished(url: URL, error: Error?) async {
-        let startedAt = currentFragmentStartedAt
-        currentFragmentURL = nil
-        currentFragmentStartedAt = nil
+    /// Sets up a fresh AVAssetWriter in fragmented MP4 mode.
+    /// MUST be called on writerQueue.
+    private func setupAssetWriter() {
+        // Clean up any existing writer
+        assetWriter = nil
+        videoInput = nil
+        audioInput = nil
+        writerStarted = false
+        firstPTS = nil
+        lastSamplePTS = nil
 
-        let wasStopping = isStopping
-        let wasPausingForSystem = isPausingForSystem
-        isPausingForSystem = false
-        let expectedLimit = isExpectedLimit(error)
-        let size = fileSize(of: url)
-        let succeeded = size > 0 && (error == nil || expectedLimit || recordingSucceeded(error))
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("livestream-\(UUID().uuidString).mp4")
 
-        if succeeded {
-            recordingStartFailures = 0
-            var duration = await duration(of: url)
-            if duration <= 0, let startedAt {
-                duration = max(0, Date().timeIntervalSince(startedAt))
+        guard let writer = try? AVAssetWriter(outputURL: tempURL, fileType: .mp4) else {
+            Task { @MainActor in
+                self.onLog?("✗ No se pudo crear AVAssetWriter.")
             }
+            return
+        }
 
-            let fragment = LocalFragment(
-                id: UUID(),
-                url: url,
-                duration: duration,
-                sizeBytes: size,
-                uploaded: false,
-                uploading: false
-            )
-            fragments.append(fragment)
-            recordedFragments += 1
-            onLog?(
-                "Fragmento \(url.lastPathComponent) · "
-                + "\(Self.formatBytes(size)) · \(Self.formatDuration(duration))"
-            )
-            publishStats()
-            enqueueUpload(id: fragment.id)
-            pruneIfNeeded()
-        } else {
-            try? fileManager.removeItem(at: url)
-            if let error, !expectedLimit {
-                let nsError = error as NSError
-                onLog?(
-                    "✗ La grabación se detuvo "
-                    + "[\(nsError.domain) \(nsError.code)]: \(error.localizedDescription)"
-                )
-                if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
-                    onLog?(
-                        "  Causa: [\(underlying.domain) \(underlying.code)] "
-                        + "\(underlying.localizedDescription)"
-                    )
+        // Fragmented MP4: ~1 s segments via delegate
+        writer.preferredOutputSegmentInterval = CMTime(value: 1, timescale: 1)
+        writer.outputFileTypeProfile = .mpeg4AppleHLS
+        writer.delegate = self
+
+        // Video input: H.264, 640×480, ~1000 kbps, 1 keyframe/s
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: 640,
+            AVVideoHeightKey: 480,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 1_000_000,
+                AVVideoMaxKeyFrameIntervalDurationKey: 1.0,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264BaselineAutoLevel,
+            ] as [String: Any],
+        ]
+        let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        vInput.expectsMediaDataInRealTime = true
+        // Transform for portrait (back camera delivers landscape; rotate 90° CW)
+        vInput.transform = CGAffineTransform(rotationAngle: .pi / 2)
+        writer.add(vInput)
+        self.videoInput = vInput
+
+        // Audio input: AAC-LC, 1 channel, 44.1 kHz
+        let audioSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 64000,
+        ]
+        let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+        aInput.expectsMediaDataInRealTime = true
+        writer.add(aInput)
+        self.audioInput = aInput
+
+        self.assetWriter = writer
+    }
+
+    /// Finalizes the writer, flushing the last partial segment.
+    private func finalizeWriter() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            writerQueue.async {
+                guard let writer = self.assetWriter else {
+                    continuation.resume()
+                    return
                 }
-            } else if size == 0 {
-                onLog?("✗ La grabación no generó datos.")
-            }
-        }
 
-        if wasStopping {
-            resumeStopIfNeeded()
-            return
-        }
-
-        if isInactive {
-            return
-        }
-
-        guard isStreaming else { return }
-
-        if succeeded || wasPausingForSystem {
-            recordingStartFailures = 0
-            startNextFragment()
-            return
-        }
-
-        guard UIApplication.shared.applicationState == .active else { return }
-
-        if size == 0 {
-            recordingStartFailures += 1
-            if recordingStartFailures <= 2 {
-                onLog?(
-                    "Reintentando iniciar la grabación "
-                    + "(\(recordingStartFailures)/2)..."
-                )
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: 400_000_000)
-                    guard let self,
-                          self.isStreaming,
-                          !self.isStopping,
-                          !self.isInactive else {
-                        return
+                if writer.status == .writing {
+                    writer.finishWriting {
+                        // Clean up temp file
+                        try? FileManager.default.removeItem(at: writer.outputURL)
+                        continuation.resume()
                     }
-                    self.startNextFragment()
+                } else {
+                    try? FileManager.default.removeItem(at: writer.outputURL)
+                    continuation.resume()
                 }
-                return
+
+                self.assetWriter = nil
+                self.videoInput = nil
+                self.audioInput = nil
+                self.writerStarted = false
             }
         }
-
-        recordingStartFailures = 0
-        isStreaming = false
-        onStateChange?(false)
-        onLog?("Stream detenido por un error de grabación.")
-        await stopSession()
     }
+
+    // MARK: - App lifecycle
 
     private func observeAppLifecycle() {
         let center = NotificationCenter.default
@@ -435,282 +491,385 @@ final class CameraStreamService: NSObject {
         isInactive = true
         guard isStreaming else { return }
 
-        isPausingForSystem = true
         onLog?(
-            "La app perdió el foco o pasó a segundo plano: iOS pausa la cámara. "
+            "App a background: captura pausada. "
             + "El stream se reanudará al volver."
         )
 
-        sessionQueue.async {
-            if self.movieOutput.isRecording {
-                self.movieOutput.stopRecording()
-            }
+        // Finalize writer so the last segment is flushed.
+        // When we come back we'll create a NEW stream_id because PTS restarts.
+        Task { @MainActor in
+            await self.finalizeWriter()
         }
     }
 
     private func handleDidBecomeActive() async {
         guard isInactive else { return }
         isInactive = false
-        guard isStreaming else {
-            isPausingForSystem = false
-            return
+        guard isStreaming else { return }
+
+        // PTS will restart → new stream_id to keep monotonic start_ms.
+        // POST stop on the old stream (best-effort), then start a new one.
+        onLog?("Cámara reanudada. Creando nuevo stream (PTS reinicia).")
+
+        let oldStreamID = streamID
+        let oldDeviceID = deviceID
+
+        // Best-effort stop on old stream
+        if let client {
+            Task {
+                try? await client.stopStream(streamID: oldStreamID, deviceID: oldDeviceID)
+            }
         }
 
+        // Generate new stream
+        streamID = Self.generateStreamID().lowercased()
+        startedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+        nextSeq = 0
+        nextSegmentStartMs = 0
+        lastSegmentStartMs = -1
+        initSegmentData = nil
+        initSent = false
+        segments.removeAll()
+        recordedSegments = 0
+        uploadedSegments = 0
+
+        // POST start for new stream
+        if let client {
+            let startBody = LiveStreamClient.StartBody(
+                stream_id: streamID,
+                device_id: deviceID,
+                device_name: deviceName,
+                width: 640,
+                height: 480,
+                video_codec: "avc1.42E01E",
+                audio_codec: "mp4a.40.2",
+                started_at_ms: startedAtMs
+            )
+            do {
+                let status = try await client.startStream(startBody)
+                onLog?("Nuevo stream → \(status) · \(streamID.prefix(8))…")
+                let playlistURL = "\(baseURL.absoluteString)/live/\(streamID)/live.m3u8"
+                onLog?("playlist: \(playlistURL)")
+            } catch {
+                onLog?("✗ No se pudo crear nuevo stream: \(error.localizedDescription)")
+                // Continue anyway — segments will queue locally
+            }
+        }
+
+        publishStats()
         await startSession()
-        if currentFragmentURL == nil {
-            isPausingForSystem = false
-            startNextFragment()
-        }
-        onLog?("Cámara reanudada.")
+        await startWriter()
     }
 
-    private func resumeStopIfNeeded() {
-        guard let continuation = stopContinuation else { return }
-        stopContinuation = nil
-        continuation.resume()
-    }
+    // MARK: - Upload pipeline
 
-    private func retryPendingUploads() {
-        for fragment in fragments where !fragment.uploaded && !fragment.uploading {
-            enqueueUpload(id: fragment.id)
-        }
-    }
-
-    private func enqueueUpload(id: UUID) {
-        guard let index = fragments.firstIndex(where: { $0.id == id }),
-              !fragments[index].uploaded,
-              !fragments[index].uploading else {
-            return
-        }
-
-        fragments[index].uploading = true
+    private func enqueueInitUpload(_ data: Data, streamID: String) {
         let previous = uploadChain
         uploadChain = Task { [weak self] in
             _ = await previous?.value
-            await self?.uploadFragment(id: id)
+            await self?.doUploadInit(data, streamID: streamID)
         }
     }
 
-    private func uploadFragment(id: UUID) async {
-        guard let fragment = fragments.first(where: { $0.id == id }) else { return }
-
-        let deviceID: String
-        do {
-            deviceID = try await ensureDeviceID()
-        } catch {
-            markUploadFinished(id: id)
-            onLog?("✗  No se pudo registrar el dispositivo: \(error.localizedDescription)")
-            return
+    private func enqueueSegmentUpload(seq: Int, streamID: String) {
+        let previous = uploadChain
+        uploadChain = Task { [weak self] in
+            _ = await previous?.value
+            await self?.doUploadSegment(seq: seq, streamID: streamID)
         }
+    }
 
-        let fileName = fragment.url.lastPathComponent
-        var attempt = 1
+    private func doUploadInit(_ data: Data, streamID: String) async {
+        guard let client else { return }
+        var attempt = 0
+        let maxAttempts = 5
+        var delay: UInt64 = 1_000_000_000  // 1 s
 
-        while attempt <= 3 {
+        while attempt < maxAttempts {
+            attempt += 1
             do {
-                let summary = try await repository.uploadVideo(
-                    fileURL: fragment.url,
+                let status = try await client.sendInit(
+                    streamID: streamID,
                     deviceID: deviceID,
-                    fileName: fileName,
-                    contentType: contentType
+                    data: data
                 )
-
-                try? Data().write(to: uploadedMarkerURL(for: fragment.url))
-                if let index = fragments.firstIndex(where: { $0.id == id }) {
-                    fragments[index].uploaded = true
-                    fragments[index].uploading = false
+                await MainActor.run {
+                    self.initSent = true
+                    self.onLog?("POST init → \(status) · \(Self.formatBytes(UInt64(data.count)))")
                 }
-                uploadedFragments += 1
-                onLog?(
-                    "Enviado \(fileName) · \(Self.formatBytes(fragment.sizeBytes)) · "
-                    + "transfer \(summary.transferID.prefix(8))..."
-                )
-                pruneIfNeeded()
-                publishStats()
                 return
-            } catch {
-                if attempt == 3 {
-                    markUploadFinished(id: id)
-                    let message = error.localizedDescription
-                    onLog?(
-                        "✗  No se pudo enviar \(fileName) tras 3 intentos: "
-                        + "\(message). Se conserva localmente."
-                    )
-                    publishStats()
-
-                    if (try? await repository.health()) == nil {
-                        await stopForServerLoss(message)
+            } catch let error as LiveStreamClient.StreamError {
+                if !error.isRetryable && error.statusCode != nil {
+                    await MainActor.run {
+                        self.onLog?("✗ init falló (no reintentable): \(error.localizedDescription)")
                     }
                     return
                 }
-                attempt += 1
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled { return }
+                await MainActor.run {
+                    self.onLog?("✗ init intento \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                }
+            } catch {
+                await MainActor.run {
+                    self.onLog?("✗ init intento \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                }
+            }
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: delay)
+                delay = min(delay * 2, 8_000_000_000)
             }
         }
     }
 
-    private func markUploadFinished(id: UUID) {
-        guard let index = fragments.firstIndex(where: { $0.id == id }) else { return }
-        fragments[index].uploading = false
+    private func doUploadSegment(seq: Int, streamID: String) async {
+        guard let client else { return }
+
+        // Find segment data
+        let segmentInfo: (data: Data, startMs: Int64, durationMs: Int, capturedAtMs: Int64)?
+        segmentInfo = await MainActor.run { () -> (Data, Int64, Int, Int64)? in
+            guard let s = self.segments.first(where: { $0.streamID == streamID && $0.seq == seq }) else { return nil }
+            return (s.data, s.startMs, s.durationMs, s.capturedAtMs)
+        }
+        guard let info = segmentInfo else { return }
+
+        var attempt = 0
+        let maxAttempts = 5
+        var delay: UInt64 = 1_000_000_000  // 1 s
+
+        while attempt < maxAttempts {
+            attempt += 1
+            do {
+                let status = try await client.sendSegment(
+                    streamID: streamID,
+                    deviceID: deviceID,
+                    seq: seq,
+                    data: info.data,
+                    startMs: info.startMs,
+                    durationMs: info.durationMs,
+                    capturedAtMs: info.capturedAtMs
+                )
+                await MainActor.run {
+                    if let idx = self.segments.firstIndex(where: { $0.streamID == streamID && $0.seq == seq }) {
+                        self.segments[idx].uploaded = true
+                        self.segments[idx].uploading = false
+                    }
+                    self.uploadedSegments += 1
+                    self.onLog?(
+                        "seg \(seq) → \(status) · \(Self.formatBytes(UInt64(info.data.count))) · "
+                        + "start=\(info.startMs)ms dur=\(info.durationMs)ms"
+                    )
+                    self.pruneIfNeeded()
+                    self.publishStats()
+                }
+                return
+            } catch let error as LiveStreamClient.StreamError {
+                // 409 = seq already passed or conflict → discard, move on
+                if error.statusCode == 409 {
+                    await MainActor.run {
+                        self.onLog?("seg \(seq) → 409 (conflicto/vencido), descartado.")
+                        if let idx = self.segments.firstIndex(where: { $0.streamID == streamID && $0.seq == seq }) {
+                            self.segments[idx].uploading = false
+                        }
+                    }
+                    return
+                }
+                if !error.isRetryable {
+                    await MainActor.run {
+                        self.onLog?("✗ seg \(seq) falló: \(error.localizedDescription)")
+                        if let idx = self.segments.firstIndex(where: { $0.streamID == streamID && $0.seq == seq }) {
+                            self.segments[idx].uploading = false
+                        }
+                    }
+                    return
+                }
+                await MainActor.run {
+                    self.onLog?("✗ seg \(seq) intento \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                }
+            } catch {
+                await MainActor.run {
+                    self.onLog?("✗ seg \(seq) intento \(attempt)/\(maxAttempts): \(error.localizedDescription)")
+                }
+            }
+
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: delay)
+                delay = min(delay * 2, 8_000_000_000)
+            }
+        }
+
+        // Exhausted retries
+        await MainActor.run {
+            if let idx = self.segments.firstIndex(where: { $0.streamID == streamID && $0.seq == seq }) {
+                self.segments[idx].uploading = false
+            }
+            self.onLog?("✗ seg \(seq) agotó reintentos. Conservado en cola local.")
+            self.publishStats()
+        }
     }
 
-    private func stopForServerLoss(_ message: String) async {
-        guard isStreaming else { return }
-        onLog?("Sin acceso al servidor: \(message). Deteniendo stream.")
-        await stop()
-    }
-
-    private func ensureDeviceID() async throws -> String {
-        if let deviceID { return deviceID }
-        let id = try await repository.ensureDevice()
-        deviceID = id
-        return id
-    }
+    // MARK: - Buffer management
 
     private func pruneIfNeeded() {
-        var totalDuration = fragments.reduce(0) { $0 + $1.duration }
-
-        while totalDuration > maxLocalDuration, let oldest = fragments.first {
+        // Remove oldest uploaded segments beyond 5-min window
+        var totalDuration = segments.reduce(0.0) { $0 + Double($1.durationMs) / 1000.0 }
+        while totalDuration > maxLocalDuration, let oldest = segments.first {
             guard oldest.uploaded else { break }
+            segments.removeFirst()
+            totalDuration -= Double(oldest.durationMs) / 1000.0
+        }
 
-            try? fileManager.removeItem(at: oldest.url)
-            try? fileManager.removeItem(at: uploadedMarkerURL(for: oldest.url))
-            fragments.removeFirst()
-            totalDuration -= oldest.duration
-            onLog?(
-                "Eliminado localmente \(oldest.url.lastPathComponent) "
-                + "(ventana de 5 minutos)."
-            )
+        // Also prune non-uploaded segments that are too old (> 5 min)
+        // per spec: "Si la cola local supera 5 min, tirá los más viejos no subidos"
+        let cutoff = Date().addingTimeInterval(-maxLocalDuration)
+        while let oldest = segments.first, oldest.createdAt < cutoff, !oldest.uploading {
+            let dropped = segments.removeFirst()
+            if !dropped.uploaded {
+                onLog?("Descartado seg \(dropped.seq) (ventana 5 min excedida).")
+            }
         }
 
         publishStats()
     }
 
     private func publishStats() {
+        let pending = segments.filter { !$0.uploaded }.count
+        let localDuration = segments.reduce(0.0) { $0 + Double($1.durationMs) / 1000.0 }
+        let localBytes = segments.reduce(UInt64(0)) { $0 + UInt64($1.data.count) }
         onStats?(
             CameraStreamStats(
-                recordedFragments: recordedFragments,
-                uploadedFragments: uploadedFragments,
-                pendingUploads: fragments.filter { !$0.uploaded }.count,
-                localDuration: fragments.reduce(0) { $0 + $1.duration },
-                localBytes: fragments.reduce(0) { $0 + $1.sizeBytes }
+                recordedFragments: recordedSegments,
+                uploadedFragments: uploadedSegments,
+                pendingUploads: pending,
+                localDuration: localDuration,
+                localBytes: localBytes
             )
         )
     }
 
-    private func loadExistingFragments() async {
-        let urls = (try? fileManager.contentsOfDirectory(
-            at: streamDirectoryURL,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
+    // MARK: - Helpers
 
-        let videos = urls
-            .filter { $0.pathExtension.lowercased() == "mov" }
-            .sorted { lhs, rhs in
-                let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
-                let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate ?? .distantPast
-                return left < right
-            }
-
-        guard !videos.isEmpty else { return }
-
-        onLog?("Recuperando \(videos.count) fragmento(s) de sesiones anteriores.")
-
-        for url in videos {
-            let size = fileSize(of: url)
-            guard size > 0 else {
-                try? fileManager.removeItem(at: url)
-                try? fileManager.removeItem(at: uploadedMarkerURL(for: url))
-                continue
-            }
-
-            let duration = await duration(of: url)
-            guard duration > 0 else {
-                try? fileManager.removeItem(at: url)
-                try? fileManager.removeItem(at: uploadedMarkerURL(for: url))
-                onLog?("Descartado fragmento incompleto: \(url.lastPathComponent)")
-                continue
-            }
-
-            let uploaded = fileManager.fileExists(atPath: uploadedMarkerURL(for: url).path)
-            let fragment = LocalFragment(
-                id: UUID(),
-                url: url,
-                duration: duration,
-                sizeBytes: size,
-                uploaded: uploaded,
-                uploading: false
-            )
-            fragments.append(fragment)
-            recordedFragments += 1
-            if uploaded {
-                uploadedFragments += 1
-            } else {
-                enqueueUpload(id: fragment.id)
-            }
-        }
-
-        pruneIfNeeded()
-        publishStats()
+    static func generateStreamID() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, 16, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func duration(of url: URL) async -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        guard let time = try? await asset.load(.duration) else { return 0 }
-        let seconds = CMTimeGetSeconds(time)
-        return seconds.isFinite && seconds > 0 ? seconds : 0
-    }
-
-    private func fileSize(of url: URL) -> UInt64 {
-        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
-        return UInt64(values?.fileSize ?? 0)
-    }
-
-    private func uploadedMarkerURL(for url: URL) -> URL {
-        url.appendingPathExtension("uploaded")
-    }
-
-    private func isExpectedLimit(_ error: Error?) -> Bool {
-        guard let error = error as? AVError else { return false }
-        switch error.code {
-        case .maximumFileSizeReached, .maximumDurationReached:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func recordingSucceeded(_ error: Error?) -> Bool {
-        guard let error else { return true }
-        let nsError = error as NSError
-        let value = nsError.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? NSNumber
-        return value?.boolValue ?? false
-    }
-
-    private static func formatBytes(_ bytes: UInt64) -> String {
+    static func formatBytes(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
-    private static func formatDuration(_ seconds: TimeInterval) -> String {
+    static func formatDuration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
 
-extension CameraStreamService: AVCaptureFileOutputRecordingDelegate {
-    nonisolated func fileOutput(
-        _ output: AVCaptureFileOutput,
-        didFinishRecordingTo outputFileURL: URL,
-        from connections: [AVCaptureConnection],
-        error: Error?
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate + AVCaptureAudioDataOutputSampleBufferDelegate
+
+extension CameraStreamService: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
+
+    nonisolated func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
     ) {
-        Task { @MainActor [weak self] in
-            await self?.handleFragmentFinished(url: outputFileURL, error: error)
+        // All work on writerQueue (we're already on it since that's the delegate queue)
+        guard let writer = assetWriter else { return }
+
+        let isVideo = output is AVCaptureVideoDataOutput
+
+        // Start the writer on the first video sample
+        if !writerStarted {
+            guard isVideo else { return }  // wait for first video sample
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            firstPTS = pts
+            writer.initialSegmentStartTime = pts
+            guard writer.startWriting() else {
+                Task { @MainActor [weak self] in
+                    self?.onLog?("✗ AVAssetWriter.startWriting() falló: \(writer.error?.localizedDescription ?? "desconocido")")
+                }
+                return
+            }
+            writer.startSession(atSourceTime: pts)
+            writerStarted = true
         }
+
+        guard writer.status == .writing else { return }
+
+        let input = isVideo ? videoInput : audioInput
+        guard let input, input.isReadyForMoreMediaData else { return }
+        input.append(sampleBuffer)
+        lastSamplePTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
     }
 }
 
+// MARK: - AVAssetWriterDelegate
+
+extension CameraStreamService: AVAssetWriterDelegate {
+
+    nonisolated func assetWriter(
+        _ writer: AVAssetWriter,
+        didOutputSegmentData segmentData: Data,
+        segmentType: AVAssetSegmentType,
+        segmentReport: AVAssetSegmentReport?
+    ) {
+        switch segmentType {
+        case .initialization:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.initSegmentData = segmentData
+                self.onLog?("Init segment recibido · \(Self.formatBytes(UInt64(segmentData.count)))")
+                self.enqueueInitUpload(segmentData, streamID: self.streamID)
+            }
+
+        case .separable:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.isStreaming else { return }
+
+                let seq = self.nextSeq
+                self.nextSeq += 1
+
+                // Compute timing relative to session start
+                let durationMs: Int
+                if let report = segmentReport,
+                   let trackReport = report.trackReports.first {
+                    let durSeconds = trackReport.duration.seconds
+                    durationMs = (durSeconds.isFinite && durSeconds > 0)
+                        ? max(1, Int((durSeconds * 1000).rounded()))
+                        : 1000
+                } else {
+                    durationMs = 1000
+                }
+
+                // Strictly monotonic startMs: startMs > lastSegmentStartMs
+                let startMs = max(self.lastSegmentStartMs + 1, self.nextSegmentStartMs)
+                self.lastSegmentStartMs = startMs
+                self.nextSegmentStartMs = startMs + Int64(durationMs)
+
+                let capturedAtMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+                let segment = LocalSegment(
+                    streamID: self.streamID,
+                    seq: seq,
+                    data: segmentData,
+                    startMs: startMs,
+                    durationMs: durationMs,
+                    capturedAtMs: capturedAtMs,
+                    uploaded: false,
+                    uploading: true,
+                    createdAt: Date()
+                )
+
+                self.segments.append(segment)
+                self.recordedSegments += 1
+                self.publishStats()
+                self.enqueueSegmentUpload(seq: seq, streamID: self.streamID)
+                self.pruneIfNeeded()
+            }
+
+        @unknown default:
+            break
+        }
+    }
+}

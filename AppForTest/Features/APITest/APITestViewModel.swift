@@ -51,12 +51,12 @@ final class APITestViewModel: ObservableObject {
     }
 
     var streamStatusText: String {
-        let state = isStreaming ? "Grabando" : "Detenido"
+        let state = isStreaming ? "Transmitiendo" : "Detenido"
         let megabytes = Double(streamStats.localBytes) / 1_000_000
         let totalSeconds = Int(streamStats.localDuration.rounded())
         let duration = String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
         let localMB = String(format: "%.1f", megabytes)
-        return "\(state) · \(streamStats.recordedFragments) frag · "
+        return "\(state) · \(streamStats.recordedFragments) seg · "
             + "\(streamStats.uploadedFragments) enviados · "
             + "\(streamStats.pendingUploads) pendientes · "
             + "\(localMB) MB local · \(duration)"
@@ -201,7 +201,7 @@ final class APITestViewModel: ObservableObject {
             return
         }
 
-        append("→ Iniciar Stream de Cámara")
+        append("→ Iniciar Stream HLS de Cámara")
         do {
             try await cameraStream.start()
         } catch {

@@ -17,7 +17,9 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>Se necesita la cámara para tomar fotos dentro de la app.</string>
+    <string>Se necesita la cámara para tomar fotos y transmitir video en vivo.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Se necesita el micrófono para incluir audio en el stream en vivo.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Se necesita permiso para guardar la foto que tomes en tu galería.</string>
     <key>NSAppTransportSecurity</key>

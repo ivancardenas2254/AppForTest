@@ -37,6 +37,7 @@
 		A10000312A00000000000031 /* PhotoViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000312A00000000000031 /* PhotoViewerView.swift */; };
 		A10000322A00000000000032 /* CameraStreamService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000322A00000000000032 /* CameraStreamService.swift */; };
 		A10000332A00000000000033 /* CameraStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000332A00000000000033 /* CameraStreamView.swift */; };
+		A10000342A00000000000034 /* LiveStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000342A00000000000034 /* LiveStreamClient.swift */; };
 		B30000012A00000000000001 /* MDTPClient in Frameworks */ = {isa = PBXBuildFile; productRef = B20000012A00000000000001 /* MDTPClient */; };
 /* End PBXBuildFile section */
 
@@ -73,6 +74,7 @@
 		A20000312A00000000000031 /* PhotoViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoViewerView.swift; sourceTree = "<group>"; };
 		A20000322A00000000000032 /* CameraStreamService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraStreamService.swift; sourceTree = "<group>"; };
 		A20000332A00000000000033 /* CameraStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraStreamView.swift; sourceTree = "<group>"; };
+		A20000342A00000000000034 /* LiveStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStreamClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -232,6 +234,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000262A00000000000026 /* MDTPAPITestRepository.swift */,
+				A20000342A00000000000034 /* LiveStreamClient.swift */,
 			);
 			path = Remote;
 			sourceTree = "<group>";
@@ -397,6 +400,7 @@
 				A10000072A00000000000007 /* APITestMenuView.swift in Sources */,
 				A10000322A00000000000032 /* CameraStreamService.swift in Sources */,
 				A10000332A00000000000033 /* CameraStreamView.swift in Sources */,
+				A10000342A00000000000034 /* LiveStreamClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

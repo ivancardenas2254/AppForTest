@@ -6,6 +6,7 @@ struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
     @StateObject private var apiTestViewModel: APITestViewModel
     @State private var showAPIMenu = false
+    @State private var showStreamPreview = false
 
     private let imageLoader: PhotoImageLoading
     private let savePhotoToLibrary: SavePhotoToLibraryUseCase
@@ -64,6 +65,22 @@ struct HomeView: View {
         }
         .onAppear {
             viewModel.onAppear()
+        }
+        .onChange(of: apiTestViewModel.isStreaming) { streaming in
+            showStreamPreview = streaming
+        }
+        .fullScreenCover(isPresented: $showStreamPreview) {
+            CameraStreamScreen(
+                session: apiTestViewModel.streamPreviewSession,
+                statusText: apiTestViewModel.streamStatusText,
+                isStreaming: apiTestViewModel.isStreaming,
+                onStop: {
+                    Task { @MainActor in
+                        await apiTestViewModel.stopStreamCamera()
+                    }
+                }
+            )
+            .interactiveDismissDisabled()
         }
         .fullScreenCover(isPresented: $viewModel.isCameraPresented) {
             CameraView { image in
