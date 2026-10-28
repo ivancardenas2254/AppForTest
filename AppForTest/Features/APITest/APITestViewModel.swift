@@ -44,6 +44,13 @@ final class APITestViewModel: ObservableObject {
         stream.onStats = { [weak self] stats in
             self?.streamStats = stats
         }
+
+        if let prevCrash = CrashReporter.checkPreviousCrash() {
+            append("⚠️ CRASH EN SESIÓN ANTERIOR:")
+            for line in prevCrash.components(separatedBy: "\n") {
+                append("  \(line)")
+            }
+        }
     }
 
     var streamPreviewSession: AVCaptureSession {

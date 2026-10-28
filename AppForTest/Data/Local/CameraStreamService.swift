@@ -65,7 +65,6 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
             ]
             let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
             vInput.expectsMediaDataInRealTime = true
-            vInput.transform = CGAffineTransform(rotationAngle: .pi / 2)
             if writer.canAdd(vInput) {
                 writer.add(vInput)
                 self.videoInput = vInput
@@ -157,7 +156,12 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
 
         let input = isVideo ? videoInput : audioInput
         guard let input, input.isReadyForMoreMediaData else { return }
-        input.append(sampleBuffer)
+        if !input.append(sampleBuffer) {
+            if writer.status == .failed {
+                let err = writer.error?.localizedDescription ?? "desconocido"
+                onError?("Writer error al anexar muestra: \(err)")
+            }
+        }
     }
 
     // MARK: - AVAssetWriterDelegate
