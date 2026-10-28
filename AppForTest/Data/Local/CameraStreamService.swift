@@ -68,13 +68,15 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
             vInput.transform = CGAffineTransform(rotationAngle: .pi / 2)
             if writer.canAdd(vInput) {
                 writer.add(vInput)
+                self.videoInput = vInput
+            } else {
+                self.onError?("AVAssetWriter no pudo agregar videoInput.")
             }
-            self.videoInput = vInput
 
             // Audio input: AAC-LC, 1 channel, 44.1 kHz
             let audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 44100,
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44100.0,
                 AVNumberOfChannelsKey: 1,
                 AVEncoderBitRateKey: 64000,
             ]
@@ -82,8 +84,10 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
             aInput.expectsMediaDataInRealTime = true
             if writer.canAdd(aInput) {
                 writer.add(aInput)
+                self.audioInput = aInput
+            } else {
+                self.onError?("AVAssetWriter no pudo agregar audioInput.")
             }
-            self.audioInput = aInput
 
             self.assetWriter = writer
             self.isStarted = false
@@ -137,6 +141,7 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
         if !isStarted {
             guard isVideo else { return }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            guard pts.isValid, pts.isNumeric else { return }
             firstPTS = pts
             writer.initialSegmentStartTime = pts
             guard writer.startWriting() else {
@@ -148,7 +153,7 @@ private final class FragmentedMP4Writer: NSObject, @unchecked Sendable,
             isStarted = true
         }
 
-        guard writer.status == .writing else { return }
+        guard isStarted, writer.status == .writing else { return }
 
         let input = isVideo ? videoInput : audioInput
         guard let input, input.isReadyForMoreMediaData else { return }
@@ -417,6 +422,11 @@ final class CameraStreamService: NSObject {
                 }
 
                 do {
+                    // Audio session configuration for recording
+                    let audioSession = AVAudioSession.sharedInstance()
+                    try? audioSession.setCategory(.playAndRecord, mode: .videoRecording, options: [.defaultToSpeaker, .allowBluetooth])
+                    try? audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
                     // Session preset
                     let preset: AVCaptureSession.Preset = .vga640x480
                     self.session.sessionPreset = self.session.canSetSessionPreset(preset)
@@ -606,27 +616,27 @@ final class CameraStreamService: NSObject {
         let center = NotificationCenter.default
 
         _ = center.addObserver(
-            forName: UIApplication.willResignActiveNotification,
+            forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.handleWillResignActive()
+                self?.handleDidEnterBackground()
             }
         }
 
         _ = center.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
+            forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                await self?.handleDidBecomeActive()
+                await self?.handleWillEnterForeground()
             }
         }
     }
 
-    private func handleWillResignActive() {
+    private func handleDidEnterBackground() {
         guard !isInactive else { return }
         isInactive = true
         guard isStreaming else { return }
@@ -641,7 +651,7 @@ final class CameraStreamService: NSObject {
         }
     }
 
-    private func handleDidBecomeActive() async {
+    private func handleWillEnterForeground() async {
         guard isInactive else { return }
         isInactive = false
         guard isStreaming else { return }

@@ -67,6 +67,9 @@ struct HomeView: View {
             viewModel.onAppear()
         }
         .onChange(of: apiTestViewModel.isStreaming) { streaming in
+            if streaming {
+                showAPIMenu = false
+            }
             showStreamPreview = streaming
         }
         .fullScreenCover(isPresented: $showStreamPreview) {
